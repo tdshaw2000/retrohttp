@@ -1,9 +1,10 @@
 import re
-from dataclasses import dataclass
 from urllib.parse import urljoin
 
 import charset_normalizer
 import requests
+
+from server.contracts import FetchedDocument
 
 DEFAULT_TIMEOUT_SECONDS = 10.0
 
@@ -22,16 +23,6 @@ _ASSET_ATTR_BY_TAG = {
 _TAG_PATTERN = re.compile(
     r"<(" + "|".join(_ASSET_ATTR_BY_TAG) + r")\b[^>]*>", re.IGNORECASE
 )
-
-
-@dataclass
-class FetchedDocument:
-    url: str
-    status: int
-    headers: dict
-    html: bytes
-    content_type: str
-    asset_urls: list
 
 
 def fetch_document(url: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> FetchedDocument:

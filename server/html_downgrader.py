@@ -1,10 +1,11 @@
 import re
 import unicodedata
 from collections import Counter
-from dataclasses import dataclass, field
 from urllib.parse import quote, urljoin, urlparse
 
 from bs4 import BeautifulSoup, NavigableString
+
+from server.contracts import DowngradedDocument, FetchedDocument
 
 # Netscape 1.1 / Mosaic 2.x era allowlist per SPEC.md "HTML dialect".
 # Anything not in this set is either dropped entirely (BLOCK_STRIP_TAGS,
@@ -100,23 +101,6 @@ BLOCK_STRIP_TAGS = {
 # Schemes that never resolve to a fetchable page/asset the proxy can
 # route through itself - left untouched rather than rewritten.
 NON_PROXIED_SCHEMES = {"mailto", "tel", "javascript"}
-
-
-@dataclass
-class FetchedDocument:
-    url: str
-    html: bytes
-    status: int = 200
-    headers: dict = field(default_factory=dict)
-    content_type: str = "text/html"
-    asset_urls: list = field(default_factory=list)
-
-
-@dataclass
-class DowngradedDocument:
-    html: str
-    asset_refs: list
-    warnings: list
 
 
 def _strip_block_tags(soup: BeautifulSoup, warnings: list) -> None:
