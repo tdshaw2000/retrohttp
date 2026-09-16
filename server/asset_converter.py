@@ -12,12 +12,14 @@ SVG_MIME = "image/svg+xml"
 
 PALETTE_COLORS = 256
 
-# Size ceiling (SPEC.md flags this as an open question -- see report):
-# 640x480 matches standard VGA, the display resolution both target
-# clients (Netscape 1.1+, Mosaic 2.x on Win3.1) can assume as a safe
-# floor across the whole install base. Images only ever shrink to fit
-# this box (never upscaled) and aspect ratio is preserved.
-MAX_WIDTH = 640
+# Size ceiling (SPEC.md flags this as an open question -- see report).
+# Width raised to 800 per the project owner: Win3.1-era displays
+# commonly ran 800x600 SVGA, not just 640x480 VGA, and 640 was
+# cropping wide images more than necessary. Height stays at 480 (not
+# raised to 600) since only width was reported as too small. Images
+# only ever shrink to fit this box (never upscaled) and aspect ratio
+# is preserved.
+MAX_WIDTH = 800
 MAX_HEIGHT = 480
 
 
