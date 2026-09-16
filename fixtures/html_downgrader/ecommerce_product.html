@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Trailhead 40L Backpack &ndash; Summit Gear Co.</title>
+<link rel="stylesheet" href="/static/shop.css">
+<style>.price { font-size: 1.4em; color: #2a7; }</style>
+</head>
+<body>
+<div class="page">
+  <nav class="breadcrumbs">
+    <a href="/">Home</a> &raquo; <a href="/packs">Packs</a> &raquo; Trailhead 40L
+  </nav>
+
+  <section class="product">
+    <div class="gallery">
+      <img src="/img/trailhead-40l-main.jpg" alt="Trailhead 40L Backpack, front view">
+      <canvas id="zoom-canvas" width="400" height="400">Zoom preview unavailable</canvas>
+      <video autoplay muted loop width="320">
+        <source src="/img/trailhead-360.mp4" type="video/mp4">
+      </video>
+    </div>
+
+    <div class="details">
+      <h1>Trailhead 40L Backpack</h1>
+      <p class="price" style="color: #2a7; font-weight: bold;">&pound;129.99</p>
+      <p class="rating">&#9733;&#9733;&#9733;&#9733;&#9734; (128 reviews)</p>
+
+      <p>A rugged 40-liter pack built for multi-day trips, with a
+      ventilated back panel and rain cover included.</p>
+
+      <table class="specs">
+        <tr><th>Spec</th><th>Value</th></tr>
+        <tr><td>Capacity</td><td>40L</td></tr>
+        <tr><td>Weight</td>
+          <td>
+            <table>
+              <tr><td>Empty</td><td>1.8 kg</td></tr>
+              <tr><td>Max load</td><td>18 kg</td></tr>
+            </table>
+          </td>
+        </tr>
+        <tr><td>Colors</td><td>Slate, Moss, Ember</td></tr>
+      </table>
+
+      <form action="/cart/add" method="post">
+        <input type="hidden" name="sku" value="TH40-SLATE">
+        <select name="color">
+          <option value="slate">Slate</option>
+          <option value="moss">Moss</option>
+          <option value="ember">Ember</option>
+        </select>
+        <input type="number" name="qty" value="1" min="1">
+        <input type="submit" value="Add to Cart">
+      </form>
+    </div>
+  </section>
+
+  <section class="reviews">
+    <h2>Customer Reviews</h2>
+    <div class="review">
+      <p><b>Am&eacute;lie R.</b> &mdash; &ldquo;Great pack, held up on a
+      week-long trek in the Alps.&rdquo;</p>
+    </div>
+  </section>
+
+  <script src="https://cdn.example.com/shop-widgets.js"></script>
+  <script>trackProductView('TH40');</script>
+  <div id="chat-widget" style="position: fixed; bottom: 0; right: 0;"></div>
+</div>
+</body>
+</html>
