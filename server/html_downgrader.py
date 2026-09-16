@@ -240,6 +240,8 @@ _SMART_PUNCTUATION_MAP = str.maketrans(
         "\u2026": "...",
         "\u2022": "*",
         "\u2122": "(TM)",
+        "\u2605": "*",  # black star (filled rating)
+        "\u2606": "-",  # white star (empty rating)
     }
 )
 
