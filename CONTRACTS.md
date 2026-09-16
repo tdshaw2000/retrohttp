@@ -63,7 +63,7 @@ Consumed by: server proxy route (orchestrator-wired, not a subagent)
 
 ```
 DowngradedDocument {
-  html: string          // HTML dialect per SPEC.md — Netscape 1.1 / Mosaic 2.x era
+  html: string          // HTML dialect per SPEC.md — selected html2/html3.2 dialect
   asset_refs: [string]  // URLs now rewritten to point at /proxy/asset?url=...
   warnings: [string]    // human-readable notes on what was dropped/flattened
                          // (e.g. "stripped <script> block at offset 4021",
@@ -72,15 +72,21 @@ DowngradedDocument {
 ```
 
 Notes:
-- `html` must validate against the allowed-tag list in `SPEC.md` —
-  no `<script>`, `<style>`, `style=` attributes, frames, or any tag
-  outside the documented allowlist.
+- `html` must validate against the allowed-tag list for whichever
+  dialect was requested (see SPEC.md's "HTML version selection") — no
+  `<script>`, `<style>`, `style=` attributes, frames, or any tag
+  outside that dialect's allowlist.
 - `asset_refs` URLs are what the HTML actually points to after
   rewriting — the proxy route uses these to know what to fetch via
   `asset-converter` on request.
 - `warnings` should be genuinely useful for debugging downgrade
   quality, not just a dump of every tag touched — one line per
   meaningful decision, not per character stripped.
+- Actual function signature:
+  `downgrade_html(document: FetchedDocument, dialect: str = "html2") -> DowngradedDocument`.
+  Valid `dialect` values are `server/html_downgrader.py`'s `DIALECTS`
+  registry keys — currently `"html2"` and `"html3.2"`. An unrecognized
+  value raises `ValueError`.
 
 ---
 
