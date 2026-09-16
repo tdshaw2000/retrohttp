@@ -160,6 +160,39 @@ def test_asset_route_caches_and_does_not_refetch(tmp_path):
     assert second.body == first.body
 
 
+def test_page_fetch_defaults_to_html2_dialect(tmp_path):
+    routes = {
+        "/page": {
+            "status": 200,
+            "headers": {"Content-Type": "text/html; charset=utf-8"},
+            "body": b"<html><body><center>Hi</center></body></html>",
+        }
+    }
+
+    with run_server(routes) as base_url:
+        result = handle_proxy_request(f"{base_url}/page", AssetCache(tmp_path))
+
+    assert b"<center>" not in result.body
+    assert b"Hi" in result.body
+
+
+def test_page_fetch_honors_requested_dialect(tmp_path):
+    routes = {
+        "/page": {
+            "status": 200,
+            "headers": {"Content-Type": "text/html; charset=utf-8"},
+            "body": b"<html><body><center>Hi</center></body></html>",
+        }
+    }
+
+    with run_server(routes) as base_url:
+        result = handle_proxy_request(
+            f"{base_url}/page", AssetCache(tmp_path), dialect="html3.2"
+        )
+
+    assert b"<center>Hi</center>" in result.body
+
+
 def test_asset_route_conversion_failure_returns_404(tmp_path):
     routes = {
         "/broken.png": {
