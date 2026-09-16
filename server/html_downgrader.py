@@ -1,3 +1,4 @@
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 
@@ -59,7 +60,39 @@ ALLOWED_TAGS = {
 # whole subtree is dropped, not just the wrapping tag (contrast with
 # _unwrap_disallowed_tags, which keeps content for layout/semantic
 # wrappers like div/span).
-BLOCK_STRIP_TAGS = {"script", "style", "noscript", "frame", "frameset"}
+# lxml's HTML parser (via libxml2) does not treat these as implicitly
+# void the way it does <img>/<br>/<hr> - an unclosed real-world instance
+# would otherwise swallow all following markup as its children. They are
+# self-closed in _self_close_void_tags() before parsing so decompose()
+# on BLOCK_STRIP_TAGS can't take legitimate trailing content down with it.
+VOID_TAGS_NEEDING_SELF_CLOSE = {"embed", "source", "track", "wbr"}
+_VOID_TAG_PATTERN = re.compile(
+    r"<("
+    + "|".join(VOID_TAGS_NEEDING_SELF_CLOSE)
+    + r")(\s[^>]*?)?\s*/?>",
+    re.IGNORECASE,
+)
+
+
+BLOCK_STRIP_TAGS = {
+    "script",
+    "style",
+    "noscript",
+    "frame",
+    "frameset",
+    "canvas",
+    "video",
+    "audio",
+    "iframe",
+    "embed",
+    "object",
+    "source",
+    "track",
+    "svg",
+    "applet",
+    "map",
+    "area",
+}
 
 
 @dataclass
@@ -140,11 +173,29 @@ def _unwrap_disallowed_tags(soup: BeautifulSoup, warnings: list) -> None:
         )
 
 
+def _self_close_void_tags(html_text: str) -> str:
+    """Rewrite known-problematic void tags to self-closing form.
+
+    See VOID_TAGS_NEEDING_SELF_CLOSE - without this, an unclosed <embed>
+    (etc.) in real-world markup gets parsed as if it wrapped everything
+    that follows it in the document.
+    """
+
+    def _close(match: "re.Match") -> str:
+        tag_name = match.group(1)
+        attrs = match.group(2) or ""
+        return f"<{tag_name}{attrs} />"
+
+    return _VOID_TAG_PATTERN.sub(_close, html_text)
+
+
 def downgrade_html(document: FetchedDocument) -> DowngradedDocument:
     warnings: list = []
     asset_refs: list = []
 
-    soup = BeautifulSoup(document.html, "lxml")
+    html_text = document.html.decode("utf-8", errors="replace")
+    html_text = _self_close_void_tags(html_text)
+    soup = BeautifulSoup(html_text, "lxml")
 
     _strip_block_tags(soup, warnings)
     _strip_stylesheet_links(soup, warnings)

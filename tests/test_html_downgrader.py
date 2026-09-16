@@ -148,14 +148,16 @@ def test_unclosed_void_tags_do_not_swallow_following_content():
     # lxml's HTML parser does not treat <embed>/<source>/<track>/<wbr> as
     # implicitly self-closing the way it does <img>/<br>, so real-world
     # unclosed instances of these can otherwise swallow all following
-    # markup as children - verify that content after them survives.
+    # markup as children - verify that content after them (and after the
+    # element that legitimately contains them) survives.
     html = (
         "<embed src='thing.swf'>"
         "<p>after embed</p>"
-        "<audio src='sound.mp3'><source src='sound.mp3'><p>after source</p></audio>"
+        "<audio src='sound.mp3'><source src='sound.mp3'></audio>"
+        "<p>after audio</p>"
     )
 
     result = downgrade_html(_document(html))
 
     assert "<p>after embed</p>" in result.html
-    assert "<p>after source</p>" in result.html
+    assert "<p>after audio</p>" in result.html
