@@ -142,3 +142,20 @@ def test_strips_image_map_and_applet_tags_entirely():
     assert "no java" not in result.html
     assert "<p>before</p>" in result.html
     assert "<p>after</p>" in result.html
+
+
+def test_unclosed_void_tags_do_not_swallow_following_content():
+    # lxml's HTML parser does not treat <embed>/<source>/<track>/<wbr> as
+    # implicitly self-closing the way it does <img>/<br>, so real-world
+    # unclosed instances of these can otherwise swallow all following
+    # markup as children - verify that content after them survives.
+    html = (
+        "<embed src='thing.swf'>"
+        "<p>after embed</p>"
+        "<audio src='sound.mp3'><source src='sound.mp3'><p>after source</p></audio>"
+    )
+
+    result = downgrade_html(_document(html))
+
+    assert "<p>after embed</p>" in result.html
+    assert "<p>after source</p>" in result.html
