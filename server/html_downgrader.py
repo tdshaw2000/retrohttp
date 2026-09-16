@@ -1,6 +1,7 @@
 import re
 import unicodedata
 from collections import Counter
+from dataclasses import dataclass
 from urllib.parse import quote, urljoin, urlparse
 
 from bs4 import BeautifulSoup, NavigableString
@@ -97,15 +98,77 @@ BLOCK_STRIP_TAGS = {
     "area",
 }
 
+# Tags the real W3C HTML 3.2 Recommendation (Jan 1997) adds on top of
+# html2's ALLOWED_TAGS. map/area move from block-stripped (html2 skips
+# image maps entirely, see BLOCK_STRIP_TAGS above) to allowed-and-kept -
+# a real image map is a followable link, not inert decoration.
+_HTML3_2_EXTRA_ALLOWED_TAGS = {
+    "font",
+    "basefont",
+    "center",
+    "div",
+    "strike",
+    "caption",
+    "map",
+    "area",
+}
+
+# applet is explicitly kept block-stripped in html3.2 too - the owner's
+# call: there's no sane way for this proxy to make a Java applet do
+# anything on a vintage client, even though 3.2 itself defines <applet>.
+_HTML3_2_ALLOWED_TAGS = frozenset(ALLOWED_TAGS | _HTML3_2_EXTRA_ALLOWED_TAGS)
+_HTML3_2_BLOCK_STRIP_TAGS = frozenset(BLOCK_STRIP_TAGS - {"map", "area"})
+
+
+@dataclass(frozen=True)
+class _Dialect:
+    """Per-dialect tag policy: what's ALLOWED_TAGS/BLOCK_STRIP_TAGS for a
+    given --html-version selection. See downgrade_html()'s `dialect`
+    parameter."""
+
+    name: str
+    allowed_tags: frozenset
+    block_strip_tags: frozenset
+
+
+# Public registry of selectable dialects, keyed by the string CLI/proxy
+# callers pass to downgrade_html()'s `dialect` parameter. Real HTML
+# version numbers, not browser names, per the project's naming
+# convention.
+DIALECTS = {
+    "html2": _Dialect(
+        name="html2",
+        allowed_tags=frozenset(ALLOWED_TAGS),
+        block_strip_tags=frozenset(BLOCK_STRIP_TAGS),
+    ),
+    "html3.2": _Dialect(
+        name="html3.2",
+        allowed_tags=_HTML3_2_ALLOWED_TAGS,
+        block_strip_tags=_HTML3_2_BLOCK_STRIP_TAGS,
+    ),
+}
+
+
+def _resolve_dialect(dialect: str) -> _Dialect:
+    try:
+        return DIALECTS[dialect]
+    except KeyError:
+        valid_options = ", ".join(sorted(DIALECTS))
+        raise ValueError(
+            f"Unknown HTML dialect {dialect!r}; valid options: {valid_options}"
+        ) from None
+
 
 # Schemes that never resolve to a fetchable page/asset the proxy can
 # route through itself - left untouched rather than rewritten.
 NON_PROXIED_SCHEMES = {"mailto", "tel", "javascript"}
 
 
-def _strip_block_tags(soup: BeautifulSoup, warnings: list) -> None:
-    """Remove tags in BLOCK_STRIP_TAGS along with their entire content."""
-    for tag_name in sorted(BLOCK_STRIP_TAGS):
+def _strip_block_tags(
+    soup: BeautifulSoup, warnings: list, block_strip_tags: frozenset
+) -> None:
+    """Remove tags in block_strip_tags along with their entire content."""
+    for tag_name in sorted(block_strip_tags):
         matches = soup.find_all(tag_name)
         for match in matches:
             match.decompose()
@@ -134,12 +197,14 @@ def _strip_stylesheet_links(soup: BeautifulSoup, warnings: list) -> None:
         )
 
 
-def _strip_style_attributes(soup: BeautifulSoup, warnings: list) -> None:
+def _strip_style_attributes(
+    soup: BeautifulSoup, warnings: list, allowed_tags: frozenset
+) -> None:
     for tag in soup.find_all(True):
         if not tag.has_attr("style"):
             continue
         del tag["style"]
-        if tag.name in ALLOWED_TAGS:
+        if tag.name in allowed_tags:
             warnings.append(f"stripped inline style attribute from <{tag.name}> tag")
 
 
@@ -190,7 +255,10 @@ def _rewrite_asset_and_page_urls(
             tag["src"] = rewritten
             asset_refs.append(rewritten)
 
-    for tag in soup.find_all("a"):
+    # <area href> (html3.2 image maps) is a real followable link, exactly
+    # like <a href> - only ever present in the tree here when the active
+    # dialect allows it (html2 block-strips map/area before this runs).
+    for tag in soup.find_all(["a", "area"]):
         href = tag.get("href")
         rewritten = _proxy_rewrite(base_url, href, "/proxy")
         if rewritten:
@@ -336,8 +404,10 @@ def _flatten_nested_tables(soup: BeautifulSoup, warnings: list) -> None:
             )
 
 
-def _unwrap_disallowed_tags(soup: BeautifulSoup, warnings: list) -> None:
-    """Remove tags outside ALLOWED_TAGS while keeping their content in place.
+def _unwrap_disallowed_tags(
+    soup: BeautifulSoup, warnings: list, allowed_tags: frozenset, dialect_name: str
+) -> None:
+    """Remove tags outside allowed_tags while keeping their content in place.
 
     These are layout/semantic wrappers (div, span, section, etc.) that
     carry no renderable meaning for period browsers but whose contents
@@ -346,13 +416,13 @@ def _unwrap_disallowed_tags(soup: BeautifulSoup, warnings: list) -> None:
     """
     unwrapped_counts: Counter = Counter()
     for tag in soup.find_all(True):
-        if tag.name not in ALLOWED_TAGS:
+        if tag.name not in allowed_tags:
             unwrapped_counts[tag.name] += 1
             tag.unwrap()
 
     for tag_name, count in sorted(unwrapped_counts.items()):
         warnings.append(
-            f"unwrapped {count} <{tag_name}> tag(s) not in the Netscape 1.1 "
+            f"unwrapped {count} <{tag_name}> tag(s) not in the {dialect_name} "
             "allowlist, keeping their content"
         )
 
@@ -373,7 +443,11 @@ def _self_close_void_tags(html_text: str) -> str:
     return _VOID_TAG_PATTERN.sub(_close, html_text)
 
 
-def downgrade_html(document: FetchedDocument) -> DowngradedDocument:
+def downgrade_html(
+    document: FetchedDocument, dialect: str = "html2"
+) -> DowngradedDocument:
+    resolved_dialect = _resolve_dialect(dialect)
+
     warnings: list = []
     asset_refs: list = []
 
@@ -381,13 +455,15 @@ def downgrade_html(document: FetchedDocument) -> DowngradedDocument:
     html_text = _self_close_void_tags(html_text)
     soup = BeautifulSoup(html_text, "lxml")
 
-    _strip_block_tags(soup, warnings)
+    _strip_block_tags(soup, warnings, resolved_dialect.block_strip_tags)
     _strip_stylesheet_links(soup, warnings)
-    _strip_style_attributes(soup, warnings)
+    _strip_style_attributes(soup, warnings, resolved_dialect.allowed_tags)
     _strip_javascript_hrefs(soup, warnings)
     _rewrite_asset_and_page_urls(soup, document.url, warnings, asset_refs)
     _flatten_nested_tables(soup, warnings)
-    _unwrap_disallowed_tags(soup, warnings)
+    _unwrap_disallowed_tags(
+        soup, warnings, resolved_dialect.allowed_tags, resolved_dialect.name
+    )
     _transliterate_to_ascii(soup, warnings)
 
     html = str(soup)
