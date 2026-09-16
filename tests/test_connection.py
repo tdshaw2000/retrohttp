@@ -167,6 +167,32 @@ def test_proxy_mode_request_fetches_and_returns_downgraded_page(tmp_path):
     assert client.recv(1) == b""  # server closed its end
 
 
+def test_proxy_mode_request_honors_html_version(tmp_path):
+    routes = {
+        "/page": {
+            "status": 200,
+            "headers": {"Content-Type": "text/html; charset=utf-8"},
+            "body": b"<html><body><center>Hi</center></body></html>",
+        }
+    }
+
+    with run_origin_server(routes) as base_url:
+        client, server = socket.socketpair()
+        client.sendall(f"GET {base_url}/page HTTP/1.0\r\n\r\n".encode("ascii"))
+        client.shutdown(socket.SHUT_WR)
+
+        handle_connection(
+            server,
+            tmp_path,
+            asset_cache=AssetCache(tmp_path),
+            html_version="html3.2",
+        )
+
+        response = client.recv(65536)
+
+    assert b"<center>Hi</center>" in response
+
+
 def test_proxy_mode_request_upstream_unreachable_returns_500(tmp_path):
     dead_port = _unused_port()
     client, server = socket.socketpair()
