@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Debugging a Weird Memory Leak &ndash; jvortex.dev</title>
+<style>
+  pre { background: #f5f5f5; padding: 1em; }
+  .tag-cloud a { color: #08c; }
+</style>
+</head>
+<body>
+<div class="site-wrap">
+  <header class="site-header">
+    <div class="logo"><a href="/">jvortex.dev</a></div>
+  </header>
+
+  <div class="post">
+    <h1>Debugging a Weird Memory Leak 🐛</h1>
+    <p class="meta">Posted by J. Vortex on 2026-08-14</p>
+
+    <p>Last week I spent way too long chasing a leak that only showed up
+    after ~48 hours of uptime. Here&rsquo;s what I found&#8230;</p>
+
+    <div class="content">
+      <p>The naive fix was to just restart the process nightly, but that
+      felt like giving up. So I dug in with a heap profiler.</p>
+
+      <pre><code>heap.dump('snapshot-1.heapsnapshot');
+setTimeout(() => heap.dump('snapshot-2.heapsnapshot'), 1000 * 60 * 60);</code></pre>
+
+      <p>Turns out a <b>cache</b> of parsed templates was never being
+      evicted. Classic &mdash; a Map used as a cache with no TTL and no
+      size bound.</p>
+
+      <figure>
+        <img src="/media/2026/heap-graph.png" alt="Heap usage climbing steadily over 48 hours">
+        <figcaption>Heap usage over 48 hours, before the fix.</figcaption>
+      </figure>
+
+      <video controls width="480">
+        <source src="/media/2026/fix-demo.mp4" type="video/mp4">
+        Your browser does not support the video tag.
+      </video>
+
+      <p>Full write-up and code on <a href="https://github.com/example/leak-fix">GitHub</a>.</p>
+    </div>
+
+    <div class="tags">
+      <span class="tag-cloud">
+        <a href="/tags/nodejs">nodejs</a>
+        <a href="/tags/debugging">debugging</a>
+        <a href="/tags/performance">performance</a>
+      </span>
+    </div>
+  </div>
+
+  <aside class="comments">
+    <h2>Comments (3)</h2>
+    <div class="comment">
+      <p><b>anonyuser42:</b> nice catch, hit the exact same bug last year.</p>
+    </div>
+  </aside>
+
+  <script src="https://cdn.example.com/disqus.js" async></script>
+  <script>
+    (function() { var d = document, s = d.createElement('script');
+      s.src = 'https://example.disqus.com/embed.js'; d.body.appendChild(s); })();
+  </script>
+</div>
+</body>
+</html>
