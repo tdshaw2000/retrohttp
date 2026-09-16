@@ -31,3 +31,18 @@ def test_png_with_transparency_converts_to_gif(tmp_path):
     output_image = Image.open(output_path)
     assert output_image.format == "GIF"
     assert len(output_image.getpalette()) // 3 <= 256
+
+
+def test_webp_converts_to_gif(tmp_path):
+    data = _fixture_bytes("photo.webp")
+
+    result = convert_asset(
+        url="http://example.com/photo.webp",
+        data=data,
+        mime="image/webp",
+        output_dir=tmp_path,
+    )
+
+    assert result.mime == "image/gif"
+    output_image = Image.open(result.local_path)
+    assert output_image.format == "GIF"
