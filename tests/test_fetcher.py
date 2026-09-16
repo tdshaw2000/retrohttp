@@ -121,3 +121,25 @@ def test_fetch_normalizes_declared_non_utf8_charset_to_utf8():
         result = fetch_document(f"{base_url}/latin1")
 
     assert result.html == expected_text.encode("utf-8")
+
+
+def test_fetch_extracts_mixed_relative_and_absolute_asset_urls():
+    html_bytes = (FIXTURES / "mixed_assets.html").read_bytes()
+    routes = {
+        "/section/page": {
+            "status": 200,
+            "headers": {"Content-Type": "text/html; charset=utf-8"},
+            "body": html_bytes,
+        }
+    }
+
+    with run_server(routes) as base_url:
+        result = fetch_document(f"{base_url}/section/page")
+
+    assert result.asset_urls == [
+        f"{base_url}/style.css",
+        f"{base_url}/images/logo.gif",
+        f"{base_url}/section/pic.jpg",
+        "https://cdn.example.com/banner.png",
+        f"{base_url}/section/app.js",
+    ]
