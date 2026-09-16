@@ -46,3 +46,18 @@ def test_webp_converts_to_gif(tmp_path):
     assert result.mime == "image/gif"
     output_image = Image.open(result.local_path)
     assert output_image.format == "GIF"
+
+
+def test_progressive_jpeg_converts_to_gif(tmp_path):
+    data = _fixture_bytes("progressive.jpg")
+
+    result = convert_asset(
+        url="http://example.com/progressive.jpg",
+        data=data,
+        mime="image/jpeg",
+        output_dir=tmp_path,
+    )
+
+    assert result.mime == "image/gif"
+    output_image = Image.open(result.local_path)
+    assert output_image.format == "GIF"
