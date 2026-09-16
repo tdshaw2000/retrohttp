@@ -34,8 +34,8 @@ Netscape 3.x / HTML 3.2+ era).
 - Handle malformed / truncated / sloppy requests gracefully — old
   client and network stacks are not spec-perfect. Prefer a best-effort
   response or clean 4xx over hanging or crashing.
-- Basic status codes only: 200, 404, 403, 500. No need for anything
-  requiring content negotiation.
+- Basic status codes only: 200, 400, 403, 404, 500. No need for
+  anything requiring content negotiation.
 
 ### Proxy-mode request handling
 
