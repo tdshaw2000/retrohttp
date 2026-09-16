@@ -1,10 +1,14 @@
 import gzip
+import socket
 import threading
+import time
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
-from server.fetcher import FetchedDocument, fetch_document
+import pytest
+
+from server.fetcher import FetchedDocument, FetchError, fetch_document
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "fetcher"
 
@@ -18,6 +22,8 @@ class _FixtureRequestHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
             return
+
+        time.sleep(route.get("delay", 0))
 
         self.send_response(route["status"])
         for name, value in route.get("headers", {}).items():
@@ -42,6 +48,14 @@ def run_server(routes: dict):
     finally:
         server.shutdown()
         thread.join()
+
+
+def _unused_port() -> int:
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+    probe.close()
+    return port
 
 
 def test_fetch_returns_fetched_document_for_simple_page():
@@ -143,3 +157,29 @@ def test_fetch_extracts_mixed_relative_and_absolute_asset_urls():
         "https://cdn.example.com/banner.png",
         f"{base_url}/section/app.js",
     ]
+
+
+def test_fetch_raises_fetch_error_for_unreachable_host():
+    dead_port = _unused_port()
+
+    with pytest.raises(FetchError):
+        fetch_document(f"http://127.0.0.1:{dead_port}/anything", timeout=1)
+
+
+def test_fetch_raises_fetch_error_instead_of_hanging_on_slow_host():
+    routes = {
+        "/slow": {
+            "status": 200,
+            "headers": {"Content-Type": "text/html; charset=utf-8"},
+            "body": b"<html></html>",
+            "delay": 2,
+        }
+    }
+
+    with run_server(routes) as base_url:
+        started_at = time.monotonic()
+        with pytest.raises(FetchError):
+            fetch_document(f"{base_url}/slow", timeout=0.2)
+        elapsed = time.monotonic() - started_at
+
+    assert elapsed < 2
