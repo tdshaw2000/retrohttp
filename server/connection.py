@@ -1,15 +1,22 @@
 import socket
+import tempfile
 from pathlib import Path
 
 from server.http_message import build_response, parse_request_line
+from server.proxy import AssetCache, handle_proxy_request
 from server.static_files import resolve_static_file
 
 
 DEFAULT_RECV_TIMEOUT_SECONDS = 10.0
 
+PROXY_TARGET_SCHEMES = ("http://", "https://")
+
 
 def handle_connection(
-    conn: socket.socket, docroot: Path, timeout: float = DEFAULT_RECV_TIMEOUT_SECONDS
+    conn: socket.socket,
+    docroot: Path,
+    asset_cache: AssetCache | None = None,
+    timeout: float = DEFAULT_RECV_TIMEOUT_SECONDS,
 ) -> None:
     conn.settimeout(timeout)
     try:
@@ -42,7 +49,11 @@ def handle_connection(
             )
             return
 
-        result = resolve_static_file(docroot, request.target)
+        if request.target.startswith(PROXY_TARGET_SCHEMES):
+            cache = asset_cache or AssetCache(Path(tempfile.mkdtemp(prefix="retrohttp-assets-")))
+            result = handle_proxy_request(request.target, cache)
+        else:
+            result = resolve_static_file(docroot, request.target)
 
         if request.version == "HTTP/0.9" and result.status != 200:
             return
