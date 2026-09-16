@@ -1,4 +1,5 @@
 import re
+import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
 from urllib.parse import quote, urljoin, urlparse
@@ -217,6 +218,65 @@ def _rewrite_asset_and_page_urls(
             tag["action"] = rewritten
 
 
+# Punctuation/symbols common in modern web content that have no direct
+# ASCII equivalent via Unicode decomposition (NFKD only handles accented
+# letters, not standalone symbols like curly quotes or em dashes).
+_SMART_PUNCTUATION_MAP = str.maketrans(
+    {
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u2013": "-",
+        "\u2014": "--",
+        "\u2026": "...",
+        "\u00a0": " ",
+        "\u2022": "*",
+        "\u00ae": "(R)",
+        "\u00a9": "(C)",
+        "\u2122": "(TM)",
+    }
+)
+
+
+def _to_ascii(text: str) -> str:
+    mapped = text.translate(_SMART_PUNCTUATION_MAP)
+    decomposed = unicodedata.normalize("NFKD", mapped)
+    return decomposed.encode("ascii", "ignore").decode("ascii")
+
+
+def _transliterate_to_ascii(soup: BeautifulSoup, warnings: list) -> None:
+    """Collapse output to ASCII/Latin-1 per SPEC.md's charset rule.
+
+    Accented Latin letters and common "smart" punctuation are
+    transliterated to their closest ASCII equivalent; anything left
+    (emoji, CJK, etc.) is dropped. Applies to text nodes and to the
+    handful of attributes that carry user-visible text (alt/title/
+    value). One aggregate warning per document, not per character.
+    """
+    changed = False
+
+    for node in soup.find_all(string=True):
+        ascii_text = _to_ascii(str(node))
+        if ascii_text != node:
+            node.replace_with(ascii_text)
+            changed = True
+
+    for tag in soup.find_all(True):
+        for attr in ("alt", "title", "value"):
+            if tag.has_attr(attr):
+                ascii_value = _to_ascii(tag[attr])
+                if ascii_value != tag[attr]:
+                    tag[attr] = ascii_value
+                    changed = True
+
+    if changed:
+        warnings.append(
+            "transliterated/stripped non-ASCII characters in text and "
+            "attributes to fit the ASCII/Latin-1 output charset"
+        )
+
+
 def _flatten_one_nested_table(soup: BeautifulSoup, table) -> None:
     """Replace `table` in place with its rows linearized as inline content.
 
@@ -322,6 +382,7 @@ def downgrade_html(document: FetchedDocument) -> DowngradedDocument:
     _rewrite_asset_and_page_urls(soup, document.url, warnings, asset_refs)
     _flatten_nested_tables(soup, warnings)
     _unwrap_disallowed_tags(soup, warnings)
+    _transliterate_to_ascii(soup, warnings)
 
     html = str(soup)
     return DowngradedDocument(html=html, asset_refs=asset_refs, warnings=warnings)
