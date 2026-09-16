@@ -48,7 +48,9 @@ class AssetCache:
             return converted
 
 
-def handle_proxy_request(target: str, asset_cache: AssetCache) -> ProxyResult:
+def handle_proxy_request(
+    target: str, asset_cache: AssetCache, dialect: str = "html2"
+) -> ProxyResult:
     parsed = urlparse(target)
     real_url = parse_qs(parsed.query).get("url", [None])[0]
 
@@ -56,19 +58,19 @@ def handle_proxy_request(target: str, asset_cache: AssetCache) -> ProxyResult:
         return _handle_asset(real_url, asset_cache)
 
     if parsed.path == PROXY_PAGE_ROUTE and real_url:
-        return _handle_page(real_url)
+        return _handle_page(real_url, dialect)
 
-    return _handle_page(target)
+    return _handle_page(target, dialect)
 
 
-def _handle_page(url: str) -> ProxyResult:
+def _handle_page(url: str, dialect: str) -> ProxyResult:
     try:
         document = fetch_document(url)
     except FetchError:
         return ProxyResult(STATUS_UPSTREAM_UNREACHABLE, "text/plain", b"Upstream fetch failed")
 
     if document.status == 200:
-        downgraded = downgrade_html(document)
+        downgraded = downgrade_html(document, dialect=dialect)
         return ProxyResult(200, "text/html", downgraded.html.encode("latin-1", errors="replace"))
 
     if document.status in (STATUS_UPSTREAM_NOT_FOUND, STATUS_UPSTREAM_FORBIDDEN):
