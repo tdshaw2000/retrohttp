@@ -1,6 +1,7 @@
 import re
 from collections import Counter
 from dataclasses import dataclass, field
+from urllib.parse import quote, urljoin, urlparse
 
 from bs4 import BeautifulSoup
 
@@ -95,6 +96,10 @@ BLOCK_STRIP_TAGS = {
 }
 
 
+# Schemes that never resolve to a fetchable page/asset the proxy can
+# route through itself - left untouched rather than rewritten.
+NON_PROXIED_SCHEMES = {"mailto", "tel", "javascript"}
+
 @dataclass
 class FetchedDocument:
     url: str
@@ -152,6 +157,66 @@ def _strip_style_attributes(soup: BeautifulSoup, warnings: list) -> None:
             warnings.append(f"stripped inline style attribute from <{tag.name}> tag")
 
 
+def _resolve_url(base_url: str, target: str) -> str:
+    if not base_url:
+        return target
+    return urljoin(base_url, target)
+
+
+def _proxy_rewrite(base_url: str, target: str, route: str) -> str | None:
+    """Rewrite target (an href/src/action value) to a proxy route URL.
+
+    Returns None if target should be left untouched (fragment-only,
+    mailto:/tel:, empty, or already a proxy route).
+    """
+    if not target or target.strip().startswith("#"):
+        return None
+
+    resolved = _resolve_url(base_url, target)
+    scheme = urlparse(resolved).scheme.lower()
+
+    if scheme in NON_PROXIED_SCHEMES:
+        return None
+
+    return f"{route}?url={quote(resolved, safe='')}"
+
+
+def _strip_javascript_hrefs(soup: BeautifulSoup, warnings: list) -> None:
+    count = 0
+    for tag in soup.find_all("a"):
+        href = tag.get("href")
+        if href and href.strip().lower().startswith("javascript:"):
+            del tag["href"]
+            count += 1
+    if count:
+        warnings.append(
+            f"stripped {count} javascript: href(s) (no JS execution on target clients)"
+        )
+
+
+def _rewrite_asset_and_page_urls(
+    soup: BeautifulSoup, base_url: str, warnings: list, asset_refs: list
+) -> None:
+    for tag in soup.find_all("img"):
+        src = tag.get("src")
+        rewritten = _proxy_rewrite(base_url, src, "/proxy/asset")
+        if rewritten:
+            tag["src"] = rewritten
+            asset_refs.append(rewritten)
+
+    for tag in soup.find_all("a"):
+        href = tag.get("href")
+        rewritten = _proxy_rewrite(base_url, href, "/proxy")
+        if rewritten:
+            tag["href"] = rewritten
+
+    for tag in soup.find_all("form"):
+        action = tag.get("action")
+        rewritten = _proxy_rewrite(base_url, action, "/proxy")
+        if rewritten:
+            tag["action"] = rewritten
+
+
 def _unwrap_disallowed_tags(soup: BeautifulSoup, warnings: list) -> None:
     """Remove tags outside ALLOWED_TAGS while keeping their content in place.
 
@@ -200,6 +265,8 @@ def downgrade_html(document: FetchedDocument) -> DowngradedDocument:
     _strip_block_tags(soup, warnings)
     _strip_stylesheet_links(soup, warnings)
     _strip_style_attributes(soup, warnings)
+    _strip_javascript_hrefs(soup, warnings)
+    _rewrite_asset_and_page_urls(soup, document.url, warnings, asset_refs)
     _unwrap_disallowed_tags(soup, warnings)
 
     html = str(soup)
