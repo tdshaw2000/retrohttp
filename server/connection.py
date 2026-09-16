@@ -20,7 +20,26 @@ def handle_connection(
 
         request = parse_request_line(raw)
 
-        if request.is_malformed or request.method != "GET":
+        if request.is_malformed:
+            conn.sendall(
+                build_response(
+                    status=400,
+                    content_type="text/plain",
+                    body=b"Bad Request",
+                    version="HTTP/1.0",
+                )
+            )
+            return
+
+        if request.method != "GET":
+            conn.sendall(
+                build_response(
+                    status=404,
+                    content_type="text/plain",
+                    body=b"Not Found",
+                    version="HTTP/1.0",
+                )
+            )
             return
 
         result = resolve_static_file(docroot, request.target)
