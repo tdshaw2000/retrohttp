@@ -226,3 +226,50 @@ def test_strips_javascript_href_but_keeps_anchor_text():
     assert "javascript:" not in result.html
     assert "click me" in result.html
     assert any("javascript:" in w for w in result.warnings)
+
+
+def test_flattens_single_level_nested_table():
+    html = (
+        "<table>"
+        "<tr><td>"
+        "<table><tr><td>inner A</td><td>inner B</td></tr></table>"
+        "</td><td>outer cell 2</td></tr>"
+        "</table>"
+    )
+
+    result = downgrade_html(_document(html))
+
+    assert result.html.count("<table>") == 1
+    assert "inner A" in result.html
+    assert "inner B" in result.html
+    assert "outer cell 2" in result.html
+    assert any("flattened" in w and "nested table" in w for w in result.warnings)
+
+
+def test_flattened_nested_table_keeps_inline_links_and_images():
+    html = (
+        "<table><tr><td>"
+        "<table><tr><td><a href='http://example.com/x'>link text</a></td></tr></table>"
+        "</td></tr></table>"
+    )
+
+    result = downgrade_html(_document(html))
+
+    assert result.html.count("<table>") == 1
+    assert "<a href=" in result.html
+    assert "link text" in result.html
+
+
+def test_flattens_doubly_nested_table():
+    html = (
+        "<table><tr><td>"
+        "<table><tr><td>"
+        "<table><tr><td>deepest</td></tr></table>"
+        "</td></tr></table>"
+        "</td></tr></table>"
+    )
+
+    result = downgrade_html(_document(html))
+
+    assert result.html.count("<table>") == 1
+    assert "deepest" in result.html
