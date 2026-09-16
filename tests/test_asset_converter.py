@@ -61,3 +61,19 @@ def test_progressive_jpeg_converts_to_gif(tmp_path):
     assert result.mime == "image/gif"
     output_image = Image.open(result.local_path)
     assert output_image.format == "GIF"
+
+
+def test_baseline_jpeg_passes_through_as_jpeg(tmp_path):
+    data = _fixture_bytes("baseline.jpg")
+
+    result = convert_asset(
+        url="http://example.com/baseline.jpg",
+        data=data,
+        mime="image/jpeg",
+        output_dir=tmp_path,
+    )
+
+    assert result.mime == "image/jpeg"
+    output_image = Image.open(result.local_path)
+    assert output_image.format == "JPEG"
+    assert not output_image.info.get("progressive")
