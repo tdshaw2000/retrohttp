@@ -4,6 +4,8 @@ version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = [
     "requests",
+    "brotli",
+    "charset-normalizer",
     "beautifulsoup4",
     "lxml",
     "Pillow",
