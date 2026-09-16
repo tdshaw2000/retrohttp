@@ -77,3 +77,17 @@ def test_baseline_jpeg_passes_through_as_jpeg(tmp_path):
     output_image = Image.open(result.local_path)
     assert output_image.format == "JPEG"
     assert not output_image.info.get("progressive")
+
+
+def test_animated_gif_keeps_only_first_frame(tmp_path):
+    data = _fixture_bytes("animated.gif")
+
+    result = convert_asset(
+        url="http://example.com/animated.gif",
+        data=data,
+        mime="image/gif",
+        output_dir=tmp_path,
+    )
+
+    output_image = Image.open(result.local_path)
+    assert getattr(output_image, "n_frames", 1) == 1
