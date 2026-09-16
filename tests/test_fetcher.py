@@ -63,3 +63,23 @@ def test_fetch_returns_fetched_document_for_simple_page():
     assert result.html == html_bytes
     assert result.asset_urls == []
     assert result.headers["Content-Type"] == "text/html; charset=utf-8"
+
+
+def test_fetch_follows_redirect_chain_to_final_url():
+    html_bytes = (FIXTURES / "redirect_target.html").read_bytes()
+    routes = {
+        "/start": {"status": 302, "headers": {"Location": "/middle"}, "body": b""},
+        "/middle": {"status": 302, "headers": {"Location": "/final"}, "body": b""},
+        "/final": {
+            "status": 200,
+            "headers": {"Content-Type": "text/html; charset=utf-8"},
+            "body": html_bytes,
+        },
+    }
+
+    with run_server(routes) as base_url:
+        result = fetch_document(f"{base_url}/start")
+
+    assert result.url == f"{base_url}/final"
+    assert result.status == 200
+    assert result.html == html_bytes
