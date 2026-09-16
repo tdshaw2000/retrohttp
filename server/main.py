@@ -11,7 +11,13 @@ from server.proxy import AssetCache
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Minimal retro HTTP server")
-    parser.add_argument("--docroot", required=True, type=Path)
+    parser.add_argument(
+        "--docroot",
+        type=Path,
+        default=None,
+        help="Local directory to serve for direct (non-proxy) requests. "
+        "Omit to run in proxy-only mode.",
+    )
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument(
         "--html-version",
@@ -21,14 +27,15 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    docroot = args.docroot.resolve()
+    docroot = args.docroot.resolve() if args.docroot else None
     asset_cache = AssetCache(Path(tempfile.mkdtemp(prefix="retrohttp-assets-")))
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
         listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         listener.bind(("0.0.0.0", args.port))
         listener.listen()
-        print(f"Serving {docroot} on port {args.port}")
+        docroot_description = docroot if docroot else "none (proxy-only mode)"
+        print(f"Serving {docroot_description} on port {args.port}")
         while True:
             conn, _addr = listener.accept()
             threading.Thread(
