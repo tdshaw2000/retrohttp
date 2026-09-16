@@ -7,6 +7,11 @@ import requests
 
 DEFAULT_TIMEOUT_SECONDS = 10.0
 
+
+class FetchError(Exception):
+    pass
+
+
 _CHARSET_PATTERN = re.compile(r'charset=["\']?([\w.-]+)', re.IGNORECASE)
 
 _ASSET_ATTR_BY_TAG = {
@@ -30,7 +35,10 @@ class FetchedDocument:
 
 
 def fetch_document(url: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> FetchedDocument:
-    response = requests.get(url, timeout=timeout)
+    try:
+        response = requests.get(url, timeout=timeout)
+    except requests.exceptions.RequestException as error:
+        raise FetchError(f"failed to fetch {url}: {error}") from error
 
     content_type_header = response.headers.get("Content-Type")
     content_type = _base_content_type(content_type_header)
