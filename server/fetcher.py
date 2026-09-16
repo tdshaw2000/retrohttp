@@ -4,7 +4,7 @@ from urllib.parse import urljoin
 import charset_normalizer
 import requests
 
-from server.contracts import FetchedDocument
+from server.contracts import FetchedAsset, FetchedDocument
 
 DEFAULT_TIMEOUT_SECONDS = 10.0
 
@@ -23,6 +23,10 @@ _ASSET_ATTR_BY_TAG = {
 _TAG_PATTERN = re.compile(
     r"<(" + "|".join(_ASSET_ATTR_BY_TAG) + r")\b[^>]*>", re.IGNORECASE
 )
+
+
+def fetch_asset(url: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> FetchedAsset:
+    return FetchedAsset(url="", bytes=b"", mime="")
 
 
 def fetch_document(url: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> FetchedDocument:

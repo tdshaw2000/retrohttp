@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from server.fetcher import FetchedDocument, FetchError, fetch_document
+from server.fetcher import FetchedAsset, FetchedDocument, FetchError, fetch_asset, fetch_document
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "fetcher"
 
@@ -185,6 +185,32 @@ def test_fetch_raises_fetch_error_for_unreachable_host():
 
     with pytest.raises(FetchError):
         fetch_document(f"http://127.0.0.1:{dead_port}/anything", timeout=1)
+
+
+def test_fetch_asset_returns_bytes_and_mime():
+    image_bytes = b"\x89PNG\r\n\x1a\nfake-png-bytes"
+    routes = {
+        "/pic.png": {
+            "status": 200,
+            "headers": {"Content-Type": "image/png"},
+            "body": image_bytes,
+        }
+    }
+
+    with run_server(routes) as base_url:
+        result = fetch_asset(f"{base_url}/pic.png")
+
+    assert isinstance(result, FetchedAsset)
+    assert result.url == f"{base_url}/pic.png"
+    assert result.bytes == image_bytes
+    assert result.mime == "image/png"
+
+
+def test_fetch_asset_raises_fetch_error_for_unreachable_host():
+    dead_port = _unused_port()
+
+    with pytest.raises(FetchError):
+        fetch_asset(f"http://127.0.0.1:{dead_port}/pic.png", timeout=1)
 
 
 def test_fetch_raises_fetch_error_instead_of_hanging_on_slow_host():
