@@ -107,9 +107,11 @@ Notes:
 - PNG sources always convert to GIF (no PNG support on target clients
   — see `SPEC.md`).
 - Palette-reduced to 256 colors.
-- Size ceiling implemented as a 640x480 (VGA) pixel-dimension cap —
-  images are downscaled to fit, preserving aspect ratio, never
-  upscaled. No separate byte-size ceiling.
+- Size ceiling implemented as an 800x480 pixel-dimension cap (width
+  raised from an initial 640 to better fit Win3.1-era 800x600 SVGA
+  displays, not just 640x480 VGA) — images are downscaled to fit,
+  preserving aspect ratio, never upscaled. No separate byte-size
+  ceiling.
 - Actual function signature:
   `convert_asset(asset: FetchedAsset, output_dir: Path) -> ConvertedAsset`.
   `output_dir` is orchestration-level cache-location config supplied
