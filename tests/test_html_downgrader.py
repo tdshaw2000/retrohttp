@@ -1,3 +1,5 @@
+import pytest
+
 from server.html_downgrader import FetchedDocument, downgrade_html
 
 
@@ -332,3 +334,83 @@ def test_transliterates_star_rating_symbols_to_asterisk_and_dash():
     result = downgrade_html(_document(html))
 
     assert "**---" in result.html
+
+
+def test_invalid_dialect_raises_value_error():
+    with pytest.raises(ValueError, match="bogus"):
+        downgrade_html(_document("<p>hi</p>"), dialect="bogus")
+
+
+def test_invalid_dialect_error_names_valid_options():
+    with pytest.raises(ValueError) as exc_info:
+        downgrade_html(_document("<p>hi</p>"), dialect="bogus")
+
+    message = str(exc_info.value)
+    assert "html2" in message
+    assert "html3.2" in message
+
+
+def test_html3_2_allows_font_center_basefont_strike_caption_tags():
+    html = (
+        "<basefont size='3'>"
+        "<center><p>centered</p></center>"
+        "<font color='red' size='4'>colored text</font>"
+        "<strike>struck</strike>"
+        "<table><caption>Table caption</caption><tr><td>cell</td></tr></table>"
+    )
+
+    result = downgrade_html(_document(html), dialect="html3.2")
+
+    assert '<basefont size="3"/>' in result.html
+    assert "<center><p>centered</p></center>" in result.html
+    assert '<font color="red" size="4">colored text</font>' in result.html
+    assert "<strike>struck</strike>" in result.html
+    assert "<caption>Table caption</caption>" in result.html
+
+
+def test_html3_2_allows_div_with_align_attribute():
+    html = "<div align=\'center\'><p>content</p></div>"
+
+    result = downgrade_html(_document(html), dialect="html3.2")
+
+    assert '<div align="center">' in result.html
+    assert "<p>content</p>" in result.html
+
+
+def test_html3_2_allows_image_map_and_rewrites_area_href():
+    html = (
+        "<map name=\'m\'>"
+        "<area shape=\'rect\' coords=\'0,0,10,10\' href=\'http://example.com/a\'>"
+        "</map>"
+    )
+
+    result = downgrade_html(_document(html), dialect="html3.2")
+
+    assert "<map" in result.html
+    assert "<area" in result.html
+    expected = "/proxy?url=http%3A%2F%2Fexample.com%2Fa"
+    assert f'href="{expected}"' in result.html
+
+
+@pytest.mark.parametrize("kwargs", [{}, {"dialect": "html2"}])
+def test_html2_still_strips_or_unwraps_html3_2_only_tags(kwargs):
+    html = (
+        "<basefont size=\'3\'>"
+        "<center><p>centered</p></center>"
+        "<font color=\'red\'>colored</font>"
+        "<strike>struck</strike>"
+        "<div align=\'center\'>divtext</div>"
+        "<map name=\'m\'><area href=\'http://example.com/a\'></map>"
+    )
+
+    result = downgrade_html(_document(html), **kwargs)
+
+    for disallowed in ("<basefont", "<center", "<font", "<strike", "<div", "<map", "<area"):
+        assert disallowed not in result.html
+    # unwrapped tags keep their content...
+    assert "centered" in result.html
+    assert "colored" in result.html
+    assert "struck" in result.html
+    assert "divtext" in result.html
+    # ...but map/area are still fully block-stripped in html2, content and all
+    assert "/proxy?url=http%3A%2F%2Fexample.com%2Fa" not in result.html
