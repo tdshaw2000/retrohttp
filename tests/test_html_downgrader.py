@@ -275,12 +275,30 @@ def test_flattens_doubly_nested_table():
     assert "deepest" in result.html
 
 
-def test_transliterates_accented_latin_characters_to_ascii():
-    html = "<p>Caf&eacute; na&iuml;ve r&eacute;sum&eacute;</p>"
+def test_keeps_latin1_characters_as_is():
+    # SPEC.md's charset target is "ASCII / Latin-1", not strict ASCII -
+    # accented Latin letters and symbols like the pound sign are valid
+    # Latin-1 codepoints (<= 0xFF) that Netscape 1.1 renders natively,
+    # so they must pass through unchanged rather than being mangled.
+    html = "<p>Caf&eacute; na&iuml;ve r&eacute;sum&eacute; &pound;12 &raquo; next</p>"
 
     result = downgrade_html(_document(html))
 
-    assert "<p>Cafe naive resume</p>" in result.html
+    assert "Café naïve résumé £12 » next" in result.html
+    assert result.warnings == []
+
+
+def test_transliterates_extended_latin_beyond_latin1_to_ascii_base_letter():
+    # Codepoints beyond 0xFF still need collapsing even when they're
+    # accented Latin letters (e.g. Polish/Czech/Vietnamese diacritics
+    # live outside the Latin-1 block) - drop to the closest ASCII base
+    # letter rather than passing the raw codepoint through or dropping
+    # the letter entirely.
+    html = "<p>Wroc&#322;aw &#382;el&#380;azna Hòa</p>"
+
+    result = downgrade_html(_document(html))
+
+    assert "ł" not in result.html  # foreign chars gone
     assert any("transliterat" in w for w in result.warnings)
 
 
@@ -299,7 +317,7 @@ def test_strips_non_transliterable_characters():
 
     assert "\U0001f600" not in result.html
     assert "日" not in result.html
-    assert all(ord(ch) < 128 for ch in result.html)
+    assert all(ord(ch) <= 0xFF for ch in result.html)
 
 
 def test_no_transliteration_warning_for_plain_ascii():
