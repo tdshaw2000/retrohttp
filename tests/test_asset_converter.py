@@ -134,3 +134,30 @@ def test_oversized_image_is_downscaled_to_ceiling(tmp_path):
     output_image = Image.open(result.local_path)
     assert output_image.width <= 640
     assert output_image.height <= 480
+
+
+def test_malicious_url_does_not_escape_output_dir(tmp_path):
+    data = _fixture_bytes("transparent.png")
+
+    result = convert_asset(
+        url="http://evil.example.com/../../../../etc/passwd.png",
+        data=data,
+        mime="image/png",
+        output_dir=tmp_path,
+    )
+
+    output_path = Path(result.local_path).resolve()
+    assert output_path.parent == tmp_path.resolve()
+
+
+def test_different_urls_produce_different_local_paths(tmp_path):
+    data = _fixture_bytes("transparent.png")
+
+    first = convert_asset(
+        url="http://example.com/one.png", data=data, mime="image/png", output_dir=tmp_path
+    )
+    second = convert_asset(
+        url="http://example.com/two.png", data=data, mime="image/png", output_dir=tmp_path
+    )
+
+    assert first.local_path != second.local_path
