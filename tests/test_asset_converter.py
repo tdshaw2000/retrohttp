@@ -23,6 +23,7 @@ def test_png_with_transparency_converts_to_gif(tmp_path):
         output_dir=tmp_path,
     )
 
+    assert isinstance(result, ConvertedAsset)
     assert result.original_url == "http://example.com/transparent.png"
     assert result.mime == "image/gif"
 
