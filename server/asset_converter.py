@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PIL import Image, UnidentifiedImageError
 
-from server.contracts import ConvertedAsset
+from server.contracts import ConvertedAsset, FetchedAsset
 
 GIF_MIME = "image/gif"
 JPEG_MIME = "image/jpeg"
@@ -25,16 +25,18 @@ class AssetConversionError(Exception):
     """Raised when a source image cannot be converted for vintage clients."""
 
 
-def convert_asset(url: str, data: bytes, mime: str, output_dir: Path) -> ConvertedAsset:
-    if _looks_like_svg(mime, data):
+def convert_asset(asset: FetchedAsset, output_dir: Path) -> ConvertedAsset:
+    if _looks_like_svg(asset.mime, asset.bytes):
         raise AssetConversionError(
-            f"SVG rasterization is out of scope for v1, skipping: {url}"
+            f"SVG rasterization is out of scope for v1, skipping: {asset.url}"
         )
 
     try:
-        return _convert_raster_image(url, data, output_dir)
+        return _convert_raster_image(asset.url, asset.bytes, output_dir)
     except (OSError, UnidentifiedImageError) as exc:
-        raise AssetConversionError(f"unreadable/corrupt image at {url}: {exc}") from exc
+        raise AssetConversionError(
+            f"unreadable/corrupt image at {asset.url}: {exc}"
+        ) from exc
 
 
 def _convert_raster_image(url: str, data: bytes, output_dir: Path) -> ConvertedAsset:
