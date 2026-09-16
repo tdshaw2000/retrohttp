@@ -1,9 +1,11 @@
 import argparse
 import socket
+import tempfile
 import threading
 from pathlib import Path
 
 from server.connection import handle_connection
+from server.proxy import AssetCache
 
 
 def main() -> None:
@@ -13,6 +15,7 @@ def main() -> None:
     args = parser.parse_args()
 
     docroot = args.docroot.resolve()
+    asset_cache = AssetCache(Path(tempfile.mkdtemp(prefix="retrohttp-assets-")))
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
         listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -22,7 +25,9 @@ def main() -> None:
         while True:
             conn, _addr = listener.accept()
             threading.Thread(
-                target=handle_connection, args=(conn, docroot), daemon=True
+                target=handle_connection,
+                args=(conn, docroot, asset_cache),
+                daemon=True,
             ).start()
 
 
