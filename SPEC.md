@@ -37,6 +37,27 @@ Netscape 3.x / HTML 3.2+ era).
 - Basic status codes only: 200, 404, 403, 500. No need for anything
   requiring content negotiation.
 
+### Proxy-mode request handling
+
+- Netscape/Mosaic are configured with this server as their HTTP proxy
+  (host:port set in the browser's own network/proxy preferences). Once
+  configured, the user browses normally — no gateway page, no form to
+  type URLs into.
+- When acting as a proxy, the client sends the request line with a
+  full absolute URI as the target, e.g. `GET http://bbc.co.uk/news
+  HTTP/1.0`, rather than the relative-path form used for direct
+  requests to this server (`GET /news HTTP/1.0` + `Host:` header).
+- The server must branch on this at the request-line parsing stage: if
+  the request target starts with a scheme (`http://`), treat it as a
+  proxy request — fetch the target via the fetcher pipeline, downgrade
+  it, and return the result. Otherwise treat it as a local static-file
+  request per the existing static-serving logic.
+- This proxy mode is also what makes TLS termination transparent to
+  the client: since the client only ever speaks plain HTTP/1.0 to this
+  server and never attempts TLS itself, all HTTPS negotiation with the
+  real origin server happens entirely on the fetcher side. See "Proxy
+  / TLS handling" below.
+
 ## Charset
 
 - Output is ASCII / Latin-1. No UTF-8.
