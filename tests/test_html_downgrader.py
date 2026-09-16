@@ -42,3 +42,65 @@ def test_warns_once_per_unwrapped_tag_type_with_count():
 
     assert any("div" in w and "2" in w for w in result.warnings)
     assert any("section" in w and "1" in w for w in result.warnings)
+
+def test_strips_script_blocks_entirely():
+    html = "<p>before</p><script>alert('hi')</script><p>after</p>"
+
+    result = downgrade_html(_document(html))
+
+    assert "<script" not in result.html
+    assert "alert" not in result.html
+    assert "<p>before</p>" in result.html
+    assert "<p>after</p>" in result.html
+    assert any("script" in w for w in result.warnings)
+
+
+def test_strips_style_blocks_entirely():
+    html = "<style>body { color: red; }</style><p>text</p>"
+
+    result = downgrade_html(_document(html))
+
+    assert "<style" not in result.html
+    assert "color: red" not in result.html
+    assert "<p>text</p>" in result.html
+    assert any("style" in w for w in result.warnings)
+
+
+def test_strips_stylesheet_link_tags():
+    html = '<link rel="stylesheet" href="/site.css"><p>text</p>'
+
+    result = downgrade_html(_document(html))
+
+    assert "<link" not in result.html
+    assert "<p>text</p>" in result.html
+    assert any("link" in w for w in result.warnings)
+
+
+def test_strips_frameset_and_frame_tags():
+    html = '<frameset cols="50%,50%"><frame src="a.html"><frame src="b.html"></frameset>'
+
+    result = downgrade_html(_document(html))
+
+    assert "<frameset" not in result.html
+    assert "<frame" not in result.html
+    assert any("frame" in w for w in result.warnings)
+
+
+def test_strips_noscript_blocks_entirely():
+    html = "<noscript><p>enable JS</p></noscript><p>real content</p>"
+
+    result = downgrade_html(_document(html))
+
+    assert "<noscript" not in result.html
+    assert "enable JS" not in result.html
+    assert "<p>real content</p>" in result.html
+
+
+def test_strips_inline_style_attribute_but_keeps_tag():
+    html = '<p style="color: red; font-weight: bold;">styled text</p>'
+
+    result = downgrade_html(_document(html))
+
+    assert "style=" not in result.html
+    assert "<p>styled text</p>" in result.html
+    assert any("style attribute" in w for w in result.warnings)
