@@ -5,6 +5,7 @@ import threading
 from pathlib import Path
 
 from server.connection import handle_connection
+from server.html_downgrader import DIALECTS
 from server.proxy import AssetCache
 
 
@@ -12,6 +13,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Minimal retro HTTP server")
     parser.add_argument("--docroot", required=True, type=Path)
     parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument(
+        "--html-version",
+        choices=sorted(DIALECTS),
+        default="html2",
+        help="HTML dialect to downgrade proxied pages to (default: html2)",
+    )
     args = parser.parse_args()
 
     docroot = args.docroot.resolve()
@@ -26,7 +33,7 @@ def main() -> None:
             conn, _addr = listener.accept()
             threading.Thread(
                 target=handle_connection,
-                args=(conn, docroot, asset_cache),
+                args=(conn, docroot, asset_cache, args.html_version),
                 daemon=True,
             ).start()
 
