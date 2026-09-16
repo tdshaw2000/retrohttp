@@ -55,6 +55,12 @@ ALLOWED_TAGS = {
     "textarea",
 }
 
+# Tags whose *content* has no period-appropriate rendering at all - the
+# whole subtree is dropped, not just the wrapping tag (contrast with
+# _unwrap_disallowed_tags, which keeps content for layout/semantic
+# wrappers like div/span).
+BLOCK_STRIP_TAGS = {"script", "style", "noscript", "frame", "frameset"}
+
 
 @dataclass
 class FetchedDocument:
@@ -71,6 +77,46 @@ class DowngradedDocument:
     html: str
     asset_refs: list
     warnings: list
+
+
+def _strip_block_tags(soup: BeautifulSoup, warnings: list) -> None:
+    """Remove tags in BLOCK_STRIP_TAGS along with their entire content."""
+    for tag_name in sorted(BLOCK_STRIP_TAGS):
+        matches = soup.find_all(tag_name)
+        for match in matches:
+            match.decompose()
+        if matches:
+            warnings.append(
+                f"stripped {len(matches)} <{tag_name}> block(s) entirely "
+                "(tag and content dropped)"
+            )
+
+
+def _is_stylesheet_link(tag) -> bool:
+    rel = tag.get("rel")
+    if not rel:
+        return False
+    values = rel if isinstance(rel, list) else [rel]
+    return any(value.lower() == "stylesheet" for value in values)
+
+
+def _strip_stylesheet_links(soup: BeautifulSoup, warnings: list) -> None:
+    links = [tag for tag in soup.find_all("link") if _is_stylesheet_link(tag)]
+    for link in links:
+        link.decompose()
+    if links:
+        warnings.append(
+            f"stripped {len(links)} <link rel=stylesheet> tag(s) entirely"
+        )
+
+
+def _strip_style_attributes(soup: BeautifulSoup, warnings: list) -> None:
+    for tag in soup.find_all(True):
+        if not tag.has_attr("style"):
+            continue
+        del tag["style"]
+        if tag.name in ALLOWED_TAGS:
+            warnings.append(f"stripped inline style attribute from <{tag.name}> tag")
 
 
 def _unwrap_disallowed_tags(soup: BeautifulSoup, warnings: list) -> None:
@@ -100,6 +146,9 @@ def downgrade_html(document: FetchedDocument) -> DowngradedDocument:
 
     soup = BeautifulSoup(document.html, "lxml")
 
+    _strip_block_tags(soup, warnings)
+    _strip_stylesheet_links(soup, warnings)
+    _strip_style_attributes(soup, warnings)
     _unwrap_disallowed_tags(soup, warnings)
 
     html = str(soup)
