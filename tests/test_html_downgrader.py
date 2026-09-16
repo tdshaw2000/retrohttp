@@ -273,3 +273,36 @@ def test_flattens_doubly_nested_table():
 
     assert result.html.count("<table>") == 1
     assert "deepest" in result.html
+
+
+def test_transliterates_accented_latin_characters_to_ascii():
+    html = "<p>Caf&eacute; na&iuml;ve r&eacute;sum&eacute;</p>"
+
+    result = downgrade_html(_document(html))
+
+    assert "<p>Cafe naive resume</p>" in result.html
+    assert any("transliterat" in w for w in result.warnings)
+
+
+def test_transliterates_smart_punctuation_to_ascii():
+    html = "<p>&ldquo;quoted&rdquo; &mdash; it&rsquo;s fine&hellip;</p>"
+
+    result = downgrade_html(_document(html))
+
+    assert '"quoted" -- it\'s fine...' in result.html
+
+
+def test_strips_non_transliterable_characters():
+    html = "<p>emoji: \U0001f600 kanji: 日本</p>"
+
+    result = downgrade_html(_document(html))
+
+    assert "\U0001f600" not in result.html
+    assert "日" not in result.html
+    assert all(ord(ch) < 128 for ch in result.html)
+
+
+def test_no_transliteration_warning_for_plain_ascii():
+    result = downgrade_html(_document("<p>plain ascii text</p>"))
+
+    assert result.warnings == []
