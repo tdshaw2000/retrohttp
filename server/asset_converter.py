@@ -11,6 +11,14 @@ SVG_MIME = "image/svg+xml"
 
 PALETTE_COLORS = 256
 
+# Size ceiling (SPEC.md flags this as an open question -- see report):
+# 640x480 matches standard VGA, the display resolution both target
+# clients (Netscape 1.1+, Mosaic 2.x on Win3.1) can assume as a safe
+# floor across the whole install base. Images only ever shrink to fit
+# this box (never upscaled) and aspect ratio is preserved.
+MAX_WIDTH = 640
+MAX_HEIGHT = 480
+
 
 @dataclass
 class ConvertedAsset:
@@ -37,6 +45,7 @@ def convert_asset(url: str, data: bytes, mime: str, output_dir: Path) -> Convert
 
 def _convert_raster_image(url: str, data: bytes, output_dir: Path) -> ConvertedAsset:
     image = Image.open(io.BytesIO(data))
+    image.thumbnail((MAX_WIDTH, MAX_HEIGHT))
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
