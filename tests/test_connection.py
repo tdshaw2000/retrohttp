@@ -167,6 +167,20 @@ def test_proxy_mode_request_fetches_and_returns_downgraded_page(tmp_path):
     assert client.recv(1) == b""  # server closed its end
 
 
+def test_direct_request_with_no_docroot_returns_clean_404():
+    client, server = socket.socketpair()
+    client.sendall(b"GET /index.html HTTP/1.0\r\n\r\n")
+    client.shutdown(socket.SHUT_WR)
+
+    handle_connection(server, None)
+
+    response = client.recv(65536)
+
+    assert response.startswith(b"HTTP/1.0 404 Not Found\r\n")
+    assert b"docroot" in response.lower()
+    assert client.recv(1) == b""  # server closed its end
+
+
 def test_proxy_mode_request_honors_html_version(tmp_path):
     routes = {
         "/page": {
