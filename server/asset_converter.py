@@ -3,7 +3,7 @@ import io
 from dataclasses import dataclass
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
 GIF_MIME = "image/gif"
 JPEG_MIME = "image/jpeg"
@@ -29,6 +29,13 @@ def convert_asset(url: str, data: bytes, mime: str, output_dir: Path) -> Convert
             f"SVG rasterization is out of scope for v1, skipping: {url}"
         )
 
+    try:
+        return _convert_raster_image(url, data, output_dir)
+    except (OSError, UnidentifiedImageError) as exc:
+        raise AssetConversionError(f"unreadable/corrupt image at {url}: {exc}") from exc
+
+
+def _convert_raster_image(url: str, data: bytes, output_dir: Path) -> ConvertedAsset:
     image = Image.open(io.BytesIO(data))
 
     output_dir = Path(output_dir)
