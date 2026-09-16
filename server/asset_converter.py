@@ -7,6 +7,7 @@ from PIL import Image
 
 GIF_MIME = "image/gif"
 JPEG_MIME = "image/jpeg"
+SVG_MIME = "image/svg+xml"
 
 PALETTE_COLORS = 256
 
@@ -23,6 +24,11 @@ class AssetConversionError(Exception):
 
 
 def convert_asset(url: str, data: bytes, mime: str, output_dir: Path) -> ConvertedAsset:
+    if _looks_like_svg(mime, data):
+        raise AssetConversionError(
+            f"SVG rasterization is out of scope for v1, skipping: {url}"
+        )
+
     image = Image.open(io.BytesIO(data))
 
     output_dir = Path(output_dir)
@@ -40,6 +46,12 @@ def convert_asset(url: str, data: bytes, mime: str, output_dir: Path) -> Convert
     palette_image.save(local_path, format="GIF")
 
     return ConvertedAsset(original_url=url, local_path=str(local_path), mime=GIF_MIME)
+
+
+def _looks_like_svg(mime: str, data: bytes) -> bool:
+    if mime == SVG_MIME:
+        return True
+    return b"<svg" in data[:512]
 
 
 def _is_baseline_jpeg(image: Image.Image) -> bool:
