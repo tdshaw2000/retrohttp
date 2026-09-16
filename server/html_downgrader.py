@@ -101,6 +101,7 @@ BLOCK_STRIP_TAGS = {
 # route through itself - left untouched rather than rewritten.
 NON_PROXIED_SCHEMES = {"mailto", "tel", "javascript"}
 
+
 @dataclass
 class FetchedDocument:
     url: str
