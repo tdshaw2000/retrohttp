@@ -53,6 +53,20 @@ def test_builds_http_1_0_404_response():
     )
 
 
+def test_builds_http_1_0_400_response():
+    result = build_response(
+        status=400, content_type="text/plain", body=b"Bad Request", version="HTTP/1.0"
+    )
+    assert result == (
+        b"HTTP/1.0 400 Bad Request\r\n"
+        b"Content-Type: text/plain\r\n"
+        b"Content-Length: 11\r\n"
+        b"Connection: close\r\n"
+        b"\r\n"
+        b"Bad Request"
+    )
+
+
 def test_builds_http_0_9_response_as_raw_body_only():
     result = build_response(
         status=200, content_type="text/html", body=b"<html></html>", version="HTTP/0.9"
