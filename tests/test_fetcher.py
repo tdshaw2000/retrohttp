@@ -1,3 +1,4 @@
+import gzip
 import threading
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -82,4 +83,24 @@ def test_fetch_follows_redirect_chain_to_final_url():
 
     assert result.url == f"{base_url}/final"
     assert result.status == 200
+    assert result.html == html_bytes
+
+
+def test_fetch_decompresses_gzip_response():
+    html_bytes = (FIXTURES / "gzip_page.html").read_bytes()
+    compressed = gzip.compress(html_bytes)
+    routes = {
+        "/gzipped": {
+            "status": 200,
+            "headers": {
+                "Content-Type": "text/html; charset=utf-8",
+                "Content-Encoding": "gzip",
+            },
+            "body": compressed,
+        }
+    }
+
+    with run_server(routes) as base_url:
+        result = fetch_document(f"{base_url}/gzipped")
+
     assert result.html == html_bytes
