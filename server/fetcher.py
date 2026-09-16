@@ -26,7 +26,13 @@ _TAG_PATTERN = re.compile(
 
 
 def fetch_asset(url: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> FetchedAsset:
-    return FetchedAsset(url="", bytes=b"", mime="")
+    try:
+        response = requests.get(url, timeout=timeout)
+    except requests.exceptions.RequestException as error:
+        raise FetchError(f"failed to fetch {url}: {error}") from error
+
+    mime = _base_content_type(response.headers.get("Content-Type"))
+    return FetchedAsset(url=response.url, bytes=response.content, mime=mime)
 
 
 def fetch_document(url: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> FetchedDocument:
