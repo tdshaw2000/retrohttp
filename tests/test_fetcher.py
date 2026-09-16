@@ -104,3 +104,20 @@ def test_fetch_decompresses_gzip_response():
         result = fetch_document(f"{base_url}/gzipped")
 
     assert result.html == html_bytes
+
+
+def test_fetch_normalizes_declared_non_utf8_charset_to_utf8():
+    latin1_bytes = (FIXTURES / "latin1_page.html").read_bytes()
+    expected_text = latin1_bytes.decode("iso-8859-1")
+    routes = {
+        "/latin1": {
+            "status": 200,
+            "headers": {"Content-Type": "text/html; charset=iso-8859-1"},
+            "body": latin1_bytes,
+        }
+    }
+
+    with run_server(routes) as base_url:
+        result = fetch_document(f"{base_url}/latin1")
+
+    assert result.html == expected_text.encode("utf-8")
