@@ -19,7 +19,7 @@ FetchedDocument {
   url: string
   status: int
   headers: dict
-  html: bytes          // raw, untouched HTML as received
+  html: bytes          // UTF-8-encoded bytes of the decoded document
   content_type: string
   asset_urls: [string] // URLs of referenced images/assets found in the page,
                         // resolved to absolute URLs, NOT yet fetched
@@ -27,11 +27,16 @@ FetchedDocument {
 ```
 
 Notes:
-- `html` is the raw document — decompressed (gzip/br handled already)
-  and decoded to text, but otherwise unmodified. No stripping, no
-  rewriting. That's the downgrader's job.
+- `html` is decompressed (gzip/br handled already) and decoded using
+  the declared or detected source charset, then always re-encoded as
+  UTF-8 bytes — never the origin's raw byte sequence. Content is
+  otherwise unmodified: no stripping, no rewriting. That's the
+  downgrader's job.
 - Redirects are followed by the fetcher; `url` reflects the final
   resolved URL, not the originally requested one.
+- Implemented as a shared dataclass in `server/contracts.py`, along
+  with `FetchedAsset`, `DowngradedDocument`, and `ConvertedAsset` below
+  — import from there rather than redefining these shapes locally.
 
 ---
 
@@ -96,8 +101,14 @@ Notes:
 - PNG sources always convert to GIF (no PNG support on target clients
   — see `SPEC.md`).
 - Palette-reduced to 256 colors.
-- If a size ceiling is set (TBD in implementation), enforce it here,
-  not upstream.
+- Size ceiling implemented as a 640x480 (VGA) pixel-dimension cap —
+  images are downscaled to fit, preserving aspect ratio, never
+  upscaled. No separate byte-size ceiling.
+- Actual function signature:
+  `convert_asset(asset: FetchedAsset, output_dir: Path) -> ConvertedAsset`.
+  `output_dir` is orchestration-level cache-location config supplied
+  by the caller — it's not part of either data shape, so it isn't a
+  field on `FetchedAsset` or `ConvertedAsset`.
 
 ---
 
