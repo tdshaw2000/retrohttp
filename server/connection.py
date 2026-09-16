@@ -4,17 +4,23 @@ from pathlib import Path
 
 from server.http_message import build_response, parse_request_line
 from server.proxy import AssetCache, handle_proxy_request
-from server.static_files import resolve_static_file
+from server.static_files import StaticResult, resolve_static_file
 
 
 DEFAULT_RECV_TIMEOUT_SECONDS = 10.0
 
 PROXY_TARGET_SCHEMES = ("http://", "https://")
 
+NO_DOCROOT_RESULT = StaticResult(
+    status=404,
+    content_type="text/plain",
+    body=b"Not Found (this server has no --docroot configured -- proxy-only mode)",
+)
+
 
 def handle_connection(
     conn: socket.socket,
-    docroot: Path,
+    docroot: Path | None,
     asset_cache: AssetCache | None = None,
     html_version: str = "html2",
     timeout: float = DEFAULT_RECV_TIMEOUT_SECONDS,
@@ -53,6 +59,8 @@ def handle_connection(
         if request.target.startswith(PROXY_TARGET_SCHEMES):
             cache = asset_cache or AssetCache(Path(tempfile.mkdtemp(prefix="retrohttp-assets-")))
             result = handle_proxy_request(request.target, cache, dialect=html_version)
+        elif docroot is None:
+            result = NO_DOCROOT_RESULT
         else:
             result = resolve_static_file(docroot, request.target)
 
