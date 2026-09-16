@@ -104,3 +104,24 @@ def test_strips_inline_style_attribute_but_keeps_tag():
     assert "style=" not in result.html
     assert "<p>styled text</p>" in result.html
     assert any("style attribute" in w for w in result.warnings)
+
+def test_strips_canvas_video_audio_and_embed_tags_entirely():
+    html = (
+        "<p>before</p>"
+        "<canvas id='c'>fallback text</canvas>"
+        "<video src='clip.mp4'><source src='clip.mp4'>no video</video>"
+        "<audio src='sound.mp3'>no audio</audio>"
+        "<iframe src='https://ads.example.com'></iframe>"
+        "<embed src='thing.swf'>"
+        "<object data='thing.swf'>object fallback</object>"
+        "<p>after</p>"
+    )
+
+    result = downgrade_html(_document(html))
+
+    for disallowed in ("<canvas", "<video", "<audio", "<iframe", "<embed", "<object", "<source"):
+        assert disallowed not in result.html
+    for leaked_text in ("fallback text", "no video", "no audio", "object fallback"):
+        assert leaked_text not in result.html
+    assert "<p>before</p>" in result.html
+    assert "<p>after</p>" in result.html
