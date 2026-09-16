@@ -1,3 +1,4 @@
+import brotli
 import gzip
 import socket
 import threading
@@ -116,6 +117,26 @@ def test_fetch_decompresses_gzip_response():
 
     with run_server(routes) as base_url:
         result = fetch_document(f"{base_url}/gzipped")
+
+    assert result.html == html_bytes
+
+
+def test_fetch_decompresses_brotli_response():
+    html_bytes = (FIXTURES / "brotli_page.html").read_bytes()
+    compressed = brotli.compress(html_bytes)
+    routes = {
+        "/brotli": {
+            "status": 200,
+            "headers": {
+                "Content-Type": "text/html; charset=utf-8",
+                "Content-Encoding": "br",
+            },
+            "body": compressed,
+        }
+    }
+
+    with run_server(routes) as base_url:
+        result = fetch_document(f"{base_url}/brotli")
 
     assert result.html == html_bytes
 
