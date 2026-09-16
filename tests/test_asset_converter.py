@@ -4,7 +4,8 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from server.asset_converter import AssetConversionError, ConvertedAsset, convert_asset
+from server.asset_converter import AssetConversionError, convert_asset
+from server.contracts import ConvertedAsset, FetchedAsset
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "asset_converter"
 
@@ -14,14 +15,13 @@ def _fixture_bytes(name: str) -> bytes:
 
 
 def test_png_with_transparency_converts_to_gif(tmp_path):
-    data = _fixture_bytes("transparent.png")
-
-    result = convert_asset(
+    asset = FetchedAsset(
         url="http://example.com/transparent.png",
-        data=data,
+        bytes=_fixture_bytes("transparent.png"),
         mime="image/png",
-        output_dir=tmp_path,
     )
+
+    result = convert_asset(asset, output_dir=tmp_path)
 
     assert isinstance(result, ConvertedAsset)
     assert result.original_url == "http://example.com/transparent.png"
@@ -37,14 +37,13 @@ def test_png_with_transparency_converts_to_gif(tmp_path):
 
 
 def test_webp_converts_to_gif(tmp_path):
-    data = _fixture_bytes("photo.webp")
-
-    result = convert_asset(
+    asset = FetchedAsset(
         url="http://example.com/photo.webp",
-        data=data,
+        bytes=_fixture_bytes("photo.webp"),
         mime="image/webp",
-        output_dir=tmp_path,
     )
+
+    result = convert_asset(asset, output_dir=tmp_path)
 
     assert result.mime == "image/gif"
     output_image = Image.open(result.local_path)
@@ -52,14 +51,13 @@ def test_webp_converts_to_gif(tmp_path):
 
 
 def test_progressive_jpeg_converts_to_gif(tmp_path):
-    data = _fixture_bytes("progressive.jpg")
-
-    result = convert_asset(
+    asset = FetchedAsset(
         url="http://example.com/progressive.jpg",
-        data=data,
+        bytes=_fixture_bytes("progressive.jpg"),
         mime="image/jpeg",
-        output_dir=tmp_path,
     )
+
+    result = convert_asset(asset, output_dir=tmp_path)
 
     assert result.mime == "image/gif"
     output_image = Image.open(result.local_path)
@@ -67,14 +65,13 @@ def test_progressive_jpeg_converts_to_gif(tmp_path):
 
 
 def test_baseline_jpeg_passes_through_as_jpeg(tmp_path):
-    data = _fixture_bytes("baseline.jpg")
-
-    result = convert_asset(
+    asset = FetchedAsset(
         url="http://example.com/baseline.jpg",
-        data=data,
+        bytes=_fixture_bytes("baseline.jpg"),
         mime="image/jpeg",
-        output_dir=tmp_path,
     )
+
+    result = convert_asset(asset, output_dir=tmp_path)
 
     assert result.mime == "image/jpeg"
     output_image = Image.open(result.local_path)
@@ -83,54 +80,49 @@ def test_baseline_jpeg_passes_through_as_jpeg(tmp_path):
 
 
 def test_animated_gif_keeps_only_first_frame(tmp_path):
-    data = _fixture_bytes("animated.gif")
-
-    result = convert_asset(
+    asset = FetchedAsset(
         url="http://example.com/animated.gif",
-        data=data,
+        bytes=_fixture_bytes("animated.gif"),
         mime="image/gif",
-        output_dir=tmp_path,
     )
+
+    result = convert_asset(asset, output_dir=tmp_path)
 
     output_image = Image.open(result.local_path)
     assert getattr(output_image, "n_frames", 1) == 1
 
 
 def test_svg_source_raises_conversion_error():
-    data = _fixture_bytes("vector.svg")
+    asset = FetchedAsset(
+        url="http://example.com/vector.svg",
+        bytes=_fixture_bytes("vector.svg"),
+        mime="image/svg+xml",
+    )
 
     with pytest.raises(AssetConversionError):
-        convert_asset(
-            url="http://example.com/vector.svg",
-            data=data,
-            mime="image/svg+xml",
-            output_dir=Path("/tmp/unused"),
-        )
+        convert_asset(asset, output_dir=Path("/tmp/unused"))
 
 
 def test_corrupt_image_raises_conversion_error(tmp_path):
-    data = _fixture_bytes("corrupt.png")
+    asset = FetchedAsset(
+        url="http://example.com/corrupt.png",
+        bytes=_fixture_bytes("corrupt.png"),
+        mime="image/png",
+    )
 
     with pytest.raises(AssetConversionError):
-        convert_asset(
-            url="http://example.com/corrupt.png",
-            data=data,
-            mime="image/png",
-            output_dir=tmp_path,
-        )
+        convert_asset(asset, output_dir=tmp_path)
 
 
 def test_oversized_image_is_downscaled_to_ceiling(tmp_path):
     large = Image.new("RGB", (1600, 1200), (10, 20, 30))
     buffer = io.BytesIO()
     large.save(buffer, format="PNG")
-
-    result = convert_asset(
-        url="http://example.com/large.png",
-        data=buffer.getvalue(),
-        mime="image/png",
-        output_dir=tmp_path,
+    asset = FetchedAsset(
+        url="http://example.com/large.png", bytes=buffer.getvalue(), mime="image/png"
     )
+
+    result = convert_asset(asset, output_dir=tmp_path)
 
     output_image = Image.open(result.local_path)
     assert output_image.width <= 640
@@ -138,14 +130,13 @@ def test_oversized_image_is_downscaled_to_ceiling(tmp_path):
 
 
 def test_malicious_url_does_not_escape_output_dir(tmp_path):
-    data = _fixture_bytes("transparent.png")
-
-    result = convert_asset(
+    asset = FetchedAsset(
         url="http://evil.example.com/../../../../etc/passwd.png",
-        data=data,
+        bytes=_fixture_bytes("transparent.png"),
         mime="image/png",
-        output_dir=tmp_path,
     )
+
+    result = convert_asset(asset, output_dir=tmp_path)
 
     output_path = Path(result.local_path).resolve()
     assert output_path.parent == tmp_path.resolve()
@@ -155,10 +146,12 @@ def test_different_urls_produce_different_local_paths(tmp_path):
     data = _fixture_bytes("transparent.png")
 
     first = convert_asset(
-        url="http://example.com/one.png", data=data, mime="image/png", output_dir=tmp_path
+        FetchedAsset(url="http://example.com/one.png", bytes=data, mime="image/png"),
+        output_dir=tmp_path,
     )
     second = convert_asset(
-        url="http://example.com/two.png", data=data, mime="image/png", output_dir=tmp_path
+        FetchedAsset(url="http://example.com/two.png", bytes=data, mime="image/png"),
+        output_dir=tmp_path,
     )
 
     assert first.local_path != second.local_path
