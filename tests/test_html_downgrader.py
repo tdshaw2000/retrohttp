@@ -161,3 +161,68 @@ def test_unclosed_void_tags_do_not_swallow_following_content():
 
     assert "<p>after embed</p>" in result.html
     assert "<p>after audio</p>" in result.html
+
+
+def test_rewrites_absolute_image_src_to_proxy_asset_route():
+    html = "<img src='http://example.com/pics/photo.gif'>"
+
+    result = downgrade_html(_document(html))
+
+    expected = "/proxy/asset?url=http%3A%2F%2Fexample.com%2Fpics%2Fphoto.gif"
+    assert expected in result.html
+    assert result.asset_refs == [expected]
+
+
+def test_rewrites_relative_image_src_against_document_url():
+    html = "<img src='pics/photo.gif'>"
+
+    result = downgrade_html(_document(html, url="http://example.com/section/page.html"))
+
+    expected = "/proxy/asset?url=http%3A%2F%2Fexample.com%2Fsection%2Fpics%2Fphoto.gif"
+    assert expected in result.html
+    assert result.asset_refs == [expected]
+
+
+def test_rewrites_anchor_href_to_proxy_page_route():
+    html = "<a href='http://news.example.com/story/1'>read more</a>"
+
+    result = downgrade_html(_document(html))
+
+    expected = "/proxy?url=http%3A%2F%2Fnews.example.com%2Fstory%2F1"
+    assert expected in result.html
+    # anchors are pages, not assets - must not show up in asset_refs
+    assert result.asset_refs == []
+
+
+def test_rewrites_form_action_to_proxy_page_route():
+    html = "<form action='http://example.com/search' method='get'><input name='q'></form>"
+
+    result = downgrade_html(_document(html))
+
+    expected = "/proxy?url=http%3A%2F%2Fexample.com%2Fsearch"
+    assert expected in result.html
+
+
+def test_leaves_mailto_and_fragment_and_tel_links_unrewritten():
+    html = (
+        "<a href='mailto:person@example.com'>mail</a>"
+        "<a href='#section2'>jump</a>"
+        "<a href='tel:+15555550100'>call</a>"
+    )
+
+    result = downgrade_html(_document(html))
+
+    assert "mailto:person@example.com" in result.html
+    assert 'href="#section2"' in result.html
+    assert "tel:+15555550100" in result.html
+    assert "/proxy?url=" not in result.html
+
+
+def test_strips_javascript_href_but_keeps_anchor_text():
+    html = "<a href=\"javascript:void(0)\">click me</a>"
+
+    result = downgrade_html(_document(html))
+
+    assert "javascript:" not in result.html
+    assert "click me" in result.html
+    assert any("javascript:" in w for w in result.warnings)
