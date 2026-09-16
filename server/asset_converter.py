@@ -6,6 +6,7 @@ from pathlib import Path
 from PIL import Image
 
 GIF_MIME = "image/gif"
+JPEG_MIME = "image/jpeg"
 
 PALETTE_COLORS = 256
 
@@ -27,6 +28,11 @@ def convert_asset(url: str, data: bytes, mime: str, output_dir: Path) -> Convert
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    if _is_baseline_jpeg(image):
+        local_path = output_dir / _filename_for(url, "jpg")
+        image.save(local_path, format="JPEG")
+        return ConvertedAsset(original_url=url, local_path=str(local_path), mime=JPEG_MIME)
+
     flattened = _flatten_to_rgb(image)
     palette_image = flattened.convert("P", palette=Image.ADAPTIVE, colors=PALETTE_COLORS)
 
@@ -34,6 +40,10 @@ def convert_asset(url: str, data: bytes, mime: str, output_dir: Path) -> Convert
     palette_image.save(local_path, format="GIF")
 
     return ConvertedAsset(original_url=url, local_path=str(local_path), mime=GIF_MIME)
+
+
+def _is_baseline_jpeg(image: Image.Image) -> bool:
+    return image.format == "JPEG" and not image.info.get("progressive")
 
 
 def _flatten_to_rgb(image: Image.Image) -> Image.Image:
