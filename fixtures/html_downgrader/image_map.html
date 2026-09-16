@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Campus Directory - Image Map Example</title>
+</head>
+<body>
+<h1>Campus Directory</h1>
+<p>Click a building below to view its department listing.</p>
+
+<img src="/images/campus-map.gif" usemap="#campusmap" alt="Campus map">
+<map name="campusmap">
+  <area shape="rect" coords="0,0,120,80" href="http://example.edu/buildings/library" alt="Library">
+  <area shape="rect" coords="121,0,240,80" href="http://example.edu/buildings/science" alt="Science Hall">
+  <area shape="circle" coords="300,150,40" href="http://example.edu/buildings/gym" alt="Gymnasium">
+</map>
+
+<p>Prefer a plain list? See the <a href="http://example.edu/buildings/">full building directory</a>.</p>
+</body>
+</html>
