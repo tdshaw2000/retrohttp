@@ -104,3 +104,15 @@ def test_svg_source_raises_conversion_error():
             mime="image/svg+xml",
             output_dir=Path("/tmp/unused"),
         )
+
+
+def test_corrupt_image_raises_conversion_error(tmp_path):
+    data = _fixture_bytes("corrupt.png")
+
+    with pytest.raises(AssetConversionError):
+        convert_asset(
+            url="http://example.com/corrupt.png",
+            data=data,
+            mime="image/png",
+            output_dir=tmp_path,
+        )
