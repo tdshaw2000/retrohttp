@@ -1,9 +1,10 @@
 import hashlib
 import io
-from dataclasses import dataclass
 from pathlib import Path
 
 from PIL import Image, UnidentifiedImageError
+
+from server.contracts import ConvertedAsset
 
 GIF_MIME = "image/gif"
 JPEG_MIME = "image/jpeg"
@@ -18,13 +19,6 @@ PALETTE_COLORS = 256
 # this box (never upscaled) and aspect ratio is preserved.
 MAX_WIDTH = 640
 MAX_HEIGHT = 480
-
-
-@dataclass
-class ConvertedAsset:
-    original_url: str
-    local_path: str
-    mime: str
 
 
 class AssetConversionError(Exception):
