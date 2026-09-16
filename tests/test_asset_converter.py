@@ -125,8 +125,27 @@ def test_oversized_image_is_downscaled_to_ceiling(tmp_path):
     result = convert_asset(asset, output_dir=tmp_path)
 
     output_image = Image.open(result.local_path)
-    assert output_image.width <= 640
+    assert output_image.width <= 800
     assert output_image.height <= 480
+
+
+def test_wide_image_is_downscaled_to_800px_width_ceiling(tmp_path):
+    # 2000x600 is wide enough that width, not height, is the binding
+    # constraint -- proves the width ceiling is actually 800, not just
+    # "some value <= 800" (a 4:3 source can't distinguish 640 from 800
+    # here since height binds first for those proportions).
+    wide = Image.new("RGB", (2000, 600), (10, 20, 30))
+    buffer = io.BytesIO()
+    wide.save(buffer, format="PNG")
+    asset = FetchedAsset(
+        url="http://example.com/wide.png", bytes=buffer.getvalue(), mime="image/png"
+    )
+
+    result = convert_asset(asset, output_dir=tmp_path)
+
+    output_image = Image.open(result.local_path)
+    assert output_image.width == 800
+    assert output_image.height == 240
 
 
 def test_malicious_url_does_not_escape_output_dir(tmp_path):
