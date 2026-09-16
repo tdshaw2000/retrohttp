@@ -3,7 +3,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from urllib.parse import quote, urljoin, urlparse
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, NavigableString
 
 # Netscape 1.1 / Mosaic 2.x era allowlist per SPEC.md "HTML dialect".
 # Anything not in this set is either dropped entirely (BLOCK_STRIP_TAGS,
@@ -217,6 +217,59 @@ def _rewrite_asset_and_page_urls(
             tag["action"] = rewritten
 
 
+def _flatten_one_nested_table(soup: BeautifulSoup, table) -> None:
+    """Replace `table` in place with its rows linearized as inline content.
+
+    Cell content (including any inline markup - links, images, formatting)
+    is kept as-is; only the table/tr/td structure is discarded, with " | "
+    between cells and <br> between rows standing in for it. This must only
+    ever be called on a table with no remaining <table> descendant, so it
+    never has to worry about producing nested block tags itself.
+    """
+    anchor = table
+    rows = table.find_all("tr")
+    for row_index, row in enumerate(rows):
+        if row_index > 0:
+            anchor.insert_after(soup.new_tag("br"))
+            anchor = anchor.find_next_sibling()
+
+        cells = row.find_all(["td", "th"])
+        for cell_index, cell in enumerate(cells):
+            if cell_index > 0:
+                separator = NavigableString(" | ")
+                anchor.insert_after(separator)
+                anchor = separator
+            for child in list(cell.contents):
+                child.extract()
+                anchor.insert_after(child)
+                anchor = child
+
+    table.decompose()
+
+
+def _flatten_nested_tables(soup: BeautifulSoup, warnings: list) -> None:
+    """Flatten tables nested inside other tables to a single level.
+
+    SPEC.md: nested table support didn't arrive until Mosaic's 1997
+    release, so nesting is treated as unsupported for this target.
+    Processed innermost-first (repeatedly finding tables with no table
+    descendant of their own) so multi-level nesting unwinds correctly.
+    """
+    while True:
+        nested_tables = [
+            t for t in soup.find_all("table") if t.find_parent("table") is not None
+        ]
+        innermost = [t for t in nested_tables if t.find("table") is None]
+        if not innermost:
+            break
+        for table in innermost:
+            _flatten_one_nested_table(soup, table)
+            warnings.append(
+                "flattened nested table to sequential inline content "
+                "(single-level table constraint)"
+            )
+
+
 def _unwrap_disallowed_tags(soup: BeautifulSoup, warnings: list) -> None:
     """Remove tags outside ALLOWED_TAGS while keeping their content in place.
 
@@ -267,6 +320,7 @@ def downgrade_html(document: FetchedDocument) -> DowngradedDocument:
     _strip_style_attributes(soup, warnings)
     _strip_javascript_hrefs(soup, warnings)
     _rewrite_asset_and_page_urls(soup, document.url, warnings, asset_refs)
+    _flatten_nested_tables(soup, warnings)
     _unwrap_disallowed_tags(soup, warnings)
 
     html = str(soup)
