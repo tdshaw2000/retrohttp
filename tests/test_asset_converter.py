@@ -1,8 +1,9 @@
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
-from server.asset_converter import ConvertedAsset, convert_asset
+from server.asset_converter import AssetConversionError, ConvertedAsset, convert_asset
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "asset_converter"
 
@@ -91,3 +92,15 @@ def test_animated_gif_keeps_only_first_frame(tmp_path):
 
     output_image = Image.open(result.local_path)
     assert getattr(output_image, "n_frames", 1) == 1
+
+
+def test_svg_source_raises_conversion_error():
+    data = _fixture_bytes("vector.svg")
+
+    with pytest.raises(AssetConversionError):
+        convert_asset(
+            url="http://example.com/vector.svg",
+            data=data,
+            mime="image/svg+xml",
+            output_dir=Path("/tmp/unused"),
+        )
