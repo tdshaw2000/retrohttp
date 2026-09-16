@@ -1,3 +1,4 @@
+import io
 from pathlib import Path
 
 import pytest
@@ -116,3 +117,20 @@ def test_corrupt_image_raises_conversion_error(tmp_path):
             mime="image/png",
             output_dir=tmp_path,
         )
+
+
+def test_oversized_image_is_downscaled_to_ceiling(tmp_path):
+    large = Image.new("RGB", (1600, 1200), (10, 20, 30))
+    buffer = io.BytesIO()
+    large.save(buffer, format="PNG")
+
+    result = convert_asset(
+        url="http://example.com/large.png",
+        data=buffer.getvalue(),
+        mime="image/png",
+        output_dir=tmp_path,
+    )
+
+    output_image = Image.open(result.local_path)
+    assert output_image.width <= 640
+    assert output_image.height <= 480
