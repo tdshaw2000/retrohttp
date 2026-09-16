@@ -125,3 +125,20 @@ def test_strips_canvas_video_audio_and_embed_tags_entirely():
         assert leaked_text not in result.html
     assert "<p>before</p>" in result.html
     assert "<p>after</p>" in result.html
+
+
+def test_strips_image_map_and_applet_tags_entirely():
+    html = (
+        "<p>before</p>"
+        "<map name='m'><area shape='rect' coords='0,0,10,10' href='a.html'></map>"
+        "<applet code='Thing.class'>no java</applet>"
+        "<p>after</p>"
+    )
+
+    result = downgrade_html(_document(html))
+
+    for disallowed in ("<map", "<area", "<applet"):
+        assert disallowed not in result.html
+    assert "no java" not in result.html
+    assert "<p>before</p>" in result.html
+    assert "<p>after</p>" in result.html
