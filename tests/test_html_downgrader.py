@@ -324,3 +324,11 @@ def test_no_transliteration_warning_for_plain_ascii():
     result = downgrade_html(_document("<p>plain ascii text</p>"))
 
     assert result.warnings == []
+
+
+def test_transliterates_star_rating_symbols_to_asterisk_and_dash():
+    html = "<p>&#9733;&#9733;&#9734;&#9734;&#9734;</p>"
+
+    result = downgrade_html(_document(html))
+
+    assert "**---" in result.html
