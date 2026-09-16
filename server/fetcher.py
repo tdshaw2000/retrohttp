@@ -1,5 +1,6 @@
 import re
 from dataclasses import dataclass
+from urllib.parse import urljoin
 
 import charset_normalizer
 import requests
@@ -7,6 +8,15 @@ import requests
 DEFAULT_TIMEOUT_SECONDS = 10.0
 
 _CHARSET_PATTERN = re.compile(r'charset=["\']?([\w.-]+)', re.IGNORECASE)
+
+_ASSET_ATTR_BY_TAG = {
+    "img": "src",
+    "link": "href",
+    "script": "src",
+}
+_TAG_PATTERN = re.compile(
+    r"<(" + "|".join(_ASSET_ATTR_BY_TAG) + r")\b[^>]*>", re.IGNORECASE
+)
 
 
 @dataclass
@@ -32,7 +42,7 @@ def fetch_document(url: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> Fetche
         headers=dict(response.headers),
         html=html,
         content_type=content_type,
-        asset_urls=[],
+        asset_urls=_extract_asset_urls(html.decode("utf-8"), response.url),
     )
 
 
@@ -67,3 +77,24 @@ def _decode_to_text(content: bytes, declared_charset: str | None) -> str:
         return str(best_match)
 
     return content.decode("utf-8", errors="replace")
+
+
+def _extract_asset_urls(html: str, base_url: str) -> list:
+    asset_urls = []
+    for tag_match in _TAG_PATTERN.finditer(html):
+        tag_name = tag_match.group(1).lower()
+        attr_name = _ASSET_ATTR_BY_TAG[tag_name]
+        attr_value = _attribute_value(tag_match.group(0), attr_name)
+        if attr_value:
+            asset_urls.append(urljoin(base_url, attr_value))
+    return asset_urls
+
+
+def _attribute_value(tag_text: str, attr_name: str) -> str | None:
+    pattern = re.compile(
+        attr_name + r"""\s*=\s*("([^"]*)"|'([^']*)'|(\S+))""", re.IGNORECASE
+    )
+    match = pattern.search(tag_text)
+    if not match:
+        return None
+    return match.group(2) or match.group(3) or match.group(4)
