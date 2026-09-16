@@ -67,7 +67,7 @@ Netscape 3.x / HTML 3.2+ era).
 - Anything outside that range must be transliterated or stripped before
   serving, not passed through.
 
-## HTML dialect ("Netscape 1.1 / Mosaic 2.x era")
+## HTML dialect: `html2` (default, Netscape 1.1 / Mosaic 2.x era)
 
 **Allowed:**
 - Core HTML 2.0 elements: headings, paragraphs, lists, anchors, basic
@@ -78,14 +78,15 @@ Netscape 3.x / HTML 3.2+ era).
   unsupported for this target)
 - Forms (`<form>`, `<input>`, basic form elements) — present in
   HTML 2.0 and supported by both target clients
-- Basic image maps if useful, otherwise skip for v1
 
 **Explicitly excluded / must be stripped or flattened:**
 - `<script>`, `<style>`, any inline CSS (`style=` attributes)
 - `<link rel="stylesheet">`
 - Frames (`<frame>`, `<frameset>`)
-- Background colors/images, font colors, anything presentational that
-  postdates this era
+- Background colors/images, font colors, `<font>`/`<center>`/`<div>`,
+  image maps (`<map>`/`<area>`), anything else presentational that
+  postdates this era — see the `html3.2` dialect below for a looser
+  option
 - Any HTML5 semantic tags, `<canvas>`, `<video>`, `<audio>`
 
 **Downgrade behavior for excluded content:**
@@ -96,6 +97,38 @@ Netscape 3.x / HTML 3.2+ era).
   sections; TBD in implementation, not blocking for spec)
 - Log/report anything silently dropped so downgrade quality is
   inspectable, not just guessed at
+
+## HTML version selection
+
+The server takes a `--html-version` flag selecting which dialect
+proxied pages get downgraded to. Values are real HTML version numbers,
+not browser names — see `server/html_downgrader.py`'s `DIALECTS`
+registry, which is the source of truth.
+
+- **`html2`** (default) — the dialect documented above. Note this is
+  an accepted approximation, not strict RFC 1866: real HTML 2.0 has no
+  tables at all: tables first appeared in the (expired, never
+  finalized) HTML 3.0 Internet-Draft. `html2` here means "HTML 2.0
+  core + tables, nothing later," which is what both target clients
+  (Netscape 1.1+, Mosaic 2.x) actually render.
+- **`html3.2`** — the real W3C HTML 3.2 Recommendation (Jan 1997,
+  https://www.w3.org/TR/REC-html32), verified against the spec text
+  directly. Adds on top of `html2`: `<font>`, `<basefont>`,
+  `<center>`, `<div>` (with `align`), `<strike>`, `<caption>`, and
+  client-side image maps (`<map>`/`<area>`, `area`'s `href` proxied
+  like any other link). Still excludes CSS and frames (both genuinely
+  absent from the 3.2 spec) and `<script>`/`<style>` content (3.2
+  itself specifies user agents must hide their contents, so stripping
+  entirely already satisfies the spec). `<applet>` is a real 3.2
+  element but is deliberately kept stripped in both dialects — no
+  sane way for this proxy to make a Java applet do anything on a
+  vintage client.
+
+Both dialects were already renderable by the target clients in
+`## Target clients` above — `font`/`center` were Netscape extensions
+in wide use well before HTML 3.2 formalized them in Jan 1997, so
+`html3.2` mode doesn't require anything newer than what Netscape
+1.1+/Mosaic 2.x already understood, just a looser downgrade.
 
 ## Images
 
@@ -128,6 +161,13 @@ Netscape 3.x / HTML 3.2+ era).
 
 ## Open questions / decide during implementation
 
-- Exact nested-table flattening strategy
-- Whether to support an allowlist/blocklist for proxied domains
-- Whether image maps are worth v1 effort
+- ~~Exact nested-table flattening strategy~~ — resolved: repeatedly
+  flatten the innermost nested `<table>`, linearizing its rows as
+  inline content (`" | "` between cells, `<br>` between rows) rather
+  than wrapping in `<p>`, so it composes correctly under arbitrary
+  nesting depth. See `server/html_downgrader.py`.
+- Whether to support an allowlist/blocklist for proxied domains — still
+  open, not yet implemented.
+- ~~Whether image maps are worth v1 effort~~ — resolved: implemented,
+  gated behind the `html3.2` dialect (see "HTML version selection"
+  above) since real HTML 2.0/`html2` has no `<map>`/`<area>`.
