@@ -22,6 +22,7 @@ FIXTURE_URLS = {
     "blog_post.html": "https://jvortex.dev/2026/08/14/memory-leak",
     "wikipedia_style.html": "https://en.example.org/wiki/Zurich",
     "ecommerce_product.html": "https://shop.example.com/packs/trailhead-40l",
+    "image_map.html": "https://example.edu/directory",
 }
 
 
@@ -136,3 +137,24 @@ def test_ecommerce_product_price_and_form_survive():
     # canvas zoom widget and its fallback text both gone
     assert "<canvas" not in result.html
     assert "Zoom preview unavailable" not in result.html
+
+
+def test_image_map_fixture_stripped_entirely_under_html2():
+    result = downgrade_html(_load_fixture("image_map.html"))
+
+    assert "<map" not in result.html
+    assert "<area" not in result.html
+    assert "Library" not in result.html
+    # the campus map <img> itself and the plain-text fallback link survive
+    assert "/proxy/asset?url=" in result.html
+    assert "full building directory" in result.html
+
+
+def test_image_map_fixture_kept_and_area_hrefs_rewritten_under_html3_2():
+    result = downgrade_html(_load_fixture("image_map.html"), dialect="html3.2")
+
+    assert "<map" in result.html
+    assert result.html.count("<area") == 3
+    assert "/proxy?url=http%3A%2F%2Fexample.edu%2Fbuildings%2Flibrary" in result.html
+    assert "/proxy?url=http%3A%2F%2Fexample.edu%2Fbuildings%2Fscience" in result.html
+    assert "/proxy?url=http%3A%2F%2Fexample.edu%2Fbuildings%2Fgym" in result.html
