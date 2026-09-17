@@ -1,0 +1,17 @@
+# Test corpus for compat-test-harness dialect/protocol validation.
+# One URL per line, `#` starts a comment. Categories chosen for stable,
+# well-known real-world pages verified reachable (HTTP 200, real GET
+# through the proxy, unmodified python-requests default User-Agent --
+# see harness report for a note on sites, e.g. Wikipedia/Wikimedia,
+# that 403 that default UA and were swapped out for this reason) on
+# 2026-09-16. Re-verify before re-running if this file is reused much
+# later -- live URLs can and do rot.
+#
+# category: news
+https://www.npr.org/sections/technology/
+# category: blog
+https://martinfowler.com/articles/patterns-of-distributed-systems/
+# category: reference/encyclopedia-style page
+https://developer.mozilla.org/en-US/docs/Web/HTTP
+# category: e-commerce product page
+https://www.newegg.com/msi-geforce-rtx-4060-mag-rtx-4060-8g/p/N82E16814137757
