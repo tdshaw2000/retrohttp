@@ -8,11 +8,21 @@ period hardware (Netscape / Mosaic on Windows 3.1).
 
 ## Target clients
 
+For the `html2`/`html3.2` dialects:
 - **Primary**: Netscape Navigator 1.1+ (Apr 1995 onward)
 - **Secondary**: NCSA Mosaic 2.x (1994/95 Alpha/Beta era)
 - Both run under Windows 3.1 via Trumpet Winsock, real or emulated
   (86Box / DOSBox recommended as the compatibility oracle — don't trust
   assumptions, test against an actual client).
+
+For the `html4` dialect (see below), the pairing is different:
+- **Netscape Communicator 4.x** and **Internet Explorer 4.x** (both
+  1997 onward), run under **Windows 95**, real or emulated. These are
+  32-bit browsers — Windows 3.1 does not run them (Communicator's
+  16-bit Win3.1 build is CSS-crippled and unreliable; IE4 never
+  shipped for Win3.1 at all). Don't move the `html2`/`html3.2` target
+  hardware to Win95 to compensate — the two dialect families have
+  genuinely different target clients.
 
 This is deliberately **not** strict RFC 1866 "HTML 2.0" — that spec
 predates tables entirely. Targeting the Netscape 1.1 / Mosaic 2.x era
@@ -130,14 +140,48 @@ in wide use well before HTML 3.2 formalized them in Jan 1997, so
 `html3.2` mode doesn't require anything newer than what Netscape
 1.1+/Mosaic 2.x already understood, just a looser downgrade.
 
+- **`html4`** — targets Netscape Communicator 4.x / IE 4.x on
+  Windows 95 (see `## Target clients` above), not the Win3.1 pairing
+  the other two dialects use. Adds on top of `html3.2`:
+  - **CSS1, filtered through a conservative property allowlist**: only
+    `color`, `background-color`, `font-family`, `font-size`,
+    `font-weight`, `font-style`, `text-align`, `margin*`, `padding*`,
+    `border*`, `width`, `height`. Applies to both `<style>` block
+    contents and inline `style=` attributes — both are now retained
+    rather than stripped, but every declaration is checked against
+    this allowlist first. Anything outside it (selectors, at-rules
+    like `@media`, any CSS2+/CSS3 syntax — `calc()`, `rgba()`,
+    flex/grid, custom properties, units CSS1 doesn't have) is dropped
+    and logged, never passed through. This is deliberately narrower
+    than the full CSS1 recommendation: Communicator 4's CSS engine is
+    known to misrender or destabilize on CSS it doesn't expect, so
+    conservative-and-working beats spec-complete-and-fragile.
+  - **Frames** (`<frameset>`, `<frame>`, `<noframes>`) — passthrough
+    only. If the source page already uses frames, carry the structure
+    through (each frame's `src` proxied like any other link). No
+    attempt to synthesize a frameset from a modern flex/grid/CSS-grid
+    layout — that's a lot of heuristic work for a layout pattern
+    modern sites essentially never use.
+  - `<script>` stays stripped, same as `html2`/`html3.2` — "no JS
+    execution" is a standing non-goal (see below), not a per-dialect
+    decision.
+  - `<applet>` stays stripped, same reasoning as the other dialects.
+
 ## Images
 
 - **GIF**: safe baseline, supported everywhere. Convert to this by
   default.
 - **JPEG**: inline support varies by client version — treat as
-  optional/best-effort, not guaranteed.
-- **PNG**: not supported (didn't exist commercially in this window).
-  Always convert PNG sources to GIF.
+  optional/best-effort, not guaranteed. Netscape 4.x/IE 4.x (the
+  `html4` pairing) support it more reliably than the `html2`/`html3.2`
+  target clients, but the default conversion behavior doesn't branch
+  on dialect for v1 — GIF stays the safe default across all dialects.
+- **PNG**: not supported (didn't exist commercially in the
+  `html2`/`html3.2` window). Always convert PNG sources to GIF. This
+  holds for `html4` too even though IE4 has partial PNG support —
+  Communicator 4 needs a plugin for it, so treat PNG as unsupported
+  across all dialects for now rather than branching on which `html4`
+  browser is in play.
 - Palette-reduce to 256 colors for GIF output. Consider a size ceiling
   given the target hardware/network is slow even when emulated.
 
@@ -171,3 +215,11 @@ in wide use well before HTML 3.2 formalized them in Jan 1997, so
 - ~~Whether image maps are worth v1 effort~~ — resolved: implemented,
   gated behind the `html3.2` dialect (see "HTML version selection"
   above) since real HTML 2.0/`html2` has no `<map>`/`<area>`.
+- `html4`'s CSS1 property allowlist (see above) is a starting set, not
+  necessarily final — expect to widen it once real Communicator
+  4.x/IE 4.x testing on Win95 surfaces properties that render fine but
+  aren't yet in the list.
+- Whether image conversion should ever branch on dialect (e.g. trust
+  JPEG more, or attempt PNG passthrough for IE4 specifically) — not
+  implemented; current stance is GIF-default/PNG→GIF across all
+  dialects, revisit only if `html4` output quality demands it.
