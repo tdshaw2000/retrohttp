@@ -41,6 +41,45 @@ def test_malformed_input_does_not_crash():
     assert filter_declarations("not-a-declaration") == ("", [])
 
 
+def test_rem_unit_is_dropped_as_unsupported():
+    # rem is CSS3 (root-relative) - Communicator 4.x/IE 4.x predate it and
+    # don't recognize it. Letting it through causes nested em-like
+    # compounding on deeply nested markup (the bbc.co.uk/football bug).
+    filtered, warnings = filter_declarations("font-size: 1.6rem")
+
+    assert filtered == ""
+    assert warnings == ["dropped unsupported CSS value for property 'font-size'"]
+
+
+def test_viewport_units_are_dropped_as_unsupported():
+    filtered, warnings = filter_declarations("width: 50vw; height: 10vmin")
+
+    assert filtered == ""
+    assert warnings == [
+        "dropped unsupported CSS value for property 'width'",
+        "dropped unsupported CSS value for property 'height'",
+    ]
+
+
+def test_css1_length_units_still_pass_through():
+    filtered, warnings = filter_declarations(
+        "font-size: 1.2em; width: 10px; margin: 0.5in; padding: 2ex 1pc 3pt 4cm"
+    )
+
+    assert filtered == (
+        "font-size: 1.2em; width: 10px; margin: 0.5in; "
+        "padding: 2ex 1pc 3pt 4cm"
+    )
+    assert warnings == []
+
+
+def test_percentage_values_still_pass_through():
+    filtered, warnings = filter_declarations("width: 50%; font-size: 110%")
+
+    assert filtered == "width: 50%; font-size: 110%"
+    assert warnings == []
+
+
 from server.css1_filter import filter_stylesheet
 
 
