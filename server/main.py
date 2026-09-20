@@ -9,6 +9,10 @@ from server.html_downgrader import DIALECTS
 from server.proxy import AssetCache
 
 
+def format_startup_message(docroot_description, port: int, html_version: str) -> str:
+    return f"Serving {docroot_description} on port {port} (HTML dialect: {html_version})"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Minimal retro HTTP server")
     parser.add_argument(
@@ -35,7 +39,7 @@ def main() -> None:
         listener.bind(("0.0.0.0", args.port))
         listener.listen()
         docroot_description = docroot if docroot else "none (proxy-only mode)"
-        print(f"Serving {docroot_description} on port {args.port}")
+        print(format_startup_message(docroot_description, args.port, args.html_version))
         while True:
             conn, _addr = listener.accept()
             threading.Thread(
