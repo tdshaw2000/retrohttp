@@ -7,6 +7,7 @@ from urllib.parse import quote, urljoin, urlparse
 from bs4 import BeautifulSoup, NavigableString
 
 from server.contracts import DowngradedDocument, FetchedDocument
+from server.css1_filter import filter_declarations, filter_stylesheet
 
 # Netscape 1.1 / Mosaic 2.x era allowlist per SPEC.md "HTML dialect".
 # Anything not in this set is either dropped entirely (BLOCK_STRIP_TAGS,
@@ -119,6 +120,18 @@ _HTML3_2_EXTRA_ALLOWED_TAGS = {
 _HTML3_2_ALLOWED_TAGS = frozenset(ALLOWED_TAGS | _HTML3_2_EXTRA_ALLOWED_TAGS)
 _HTML3_2_BLOCK_STRIP_TAGS = frozenset(BLOCK_STRIP_TAGS - {"map", "area"})
 
+# Tags the html4 dialect (Communicator 4.x / IE 4.x on Win95, see
+# SPEC.md) adds on top of html3.2's tag set. style/frameset/frame move
+# from block-stripped to allowed-and-kept - CSS1 (filtered) and frame
+# passthrough are both genuinely supported by this dialect's target
+# clients. script/applet stay block-stripped in every dialect (no JS
+# execution is a standing non-goal, not a per-dialect decision).
+_HTML4_EXTRA_ALLOWED_TAGS = {"style", "frameset", "frame", "noframes"}
+_HTML4_ALLOWED_TAGS = frozenset(_HTML3_2_ALLOWED_TAGS | _HTML4_EXTRA_ALLOWED_TAGS)
+_HTML4_BLOCK_STRIP_TAGS = frozenset(
+    _HTML3_2_BLOCK_STRIP_TAGS - _HTML4_EXTRA_ALLOWED_TAGS
+)
+
 
 @dataclass(frozen=True)
 class _Dialect:
@@ -129,6 +142,7 @@ class _Dialect:
     name: str
     allowed_tags: frozenset
     block_strip_tags: frozenset
+    allows_css: bool = False
 
 
 # Public registry of selectable dialects, keyed by the string CLI/proxy
@@ -140,11 +154,19 @@ DIALECTS = {
         name="html2",
         allowed_tags=frozenset(ALLOWED_TAGS),
         block_strip_tags=frozenset(BLOCK_STRIP_TAGS),
+        allows_css=False,
     ),
     "html3.2": _Dialect(
         name="html3.2",
         allowed_tags=_HTML3_2_ALLOWED_TAGS,
         block_strip_tags=_HTML3_2_BLOCK_STRIP_TAGS,
+        allows_css=False,
+    ),
+    "html4": _Dialect(
+        name="html4",
+        allowed_tags=_HTML4_ALLOWED_TAGS,
+        block_strip_tags=_HTML4_BLOCK_STRIP_TAGS,
+        allows_css=True,
     ),
 }
 
@@ -197,15 +219,62 @@ def _strip_stylesheet_links(soup: BeautifulSoup, warnings: list) -> None:
         )
 
 
+def _filter_style_blocks(soup: BeautifulSoup, warnings: list, allows_css: bool) -> None:
+    """Filter <style> block content through the CSS1 allowlist (html4 only).
+
+    For dialects where allows_css is False, <style> tags are already gone
+    by this point via _strip_block_tags, so this is a no-op there. For
+    html4, the tag survives that pass (style is allowed-and-kept, see
+    _HTML4_EXTRA_ALLOWED_TAGS) - this is where its content actually gets
+    filtered down to the CSS1 allowlist, dropping the tag entirely if
+    nothing survives.
+    """
+    if not allows_css:
+        return
+
+    for tag in soup.find_all("style"):
+        filtered_css, style_warnings = filter_stylesheet(tag.get_text())
+        warnings.extend(style_warnings)
+        if filtered_css:
+            tag.clear()
+            tag.append(NavigableString(filtered_css))
+        else:
+            tag.decompose()
+
+
 def _strip_style_attributes(
-    soup: BeautifulSoup, warnings: list, allowed_tags: frozenset
+    soup: BeautifulSoup, warnings: list, allowed_tags: frozenset, allows_css: bool
 ) -> None:
+    """Handle every tag's `style=` attribute per the dialect's CSS policy.
+
+    html2/html3.2 (allows_css=False) keep unconditionally deleting it, as
+    before. html4 (allows_css=True) instead runs it through the CSS1
+    declaration allowlist and keeps whatever survives, dropping the
+    attribute entirely only if nothing does.
+    """
     for tag in soup.find_all(True):
         if not tag.has_attr("style"):
             continue
-        del tag["style"]
-        if tag.name in allowed_tags:
-            warnings.append(f"stripped inline style attribute from <{tag.name}> tag")
+
+        if not allows_css:
+            del tag["style"]
+            if tag.name in allowed_tags:
+                warnings.append(
+                    f"stripped inline style attribute from <{tag.name}> tag"
+                )
+            continue
+
+        filtered, style_warnings = filter_declarations(tag["style"])
+        warnings.extend(style_warnings)
+        if filtered:
+            tag["style"] = filtered
+        else:
+            del tag["style"]
+            if tag.name in allowed_tags:
+                warnings.append(
+                    f"dropped inline style attribute from <{tag.name}> tag "
+                    "(no declarations survived CSS1 filtering)"
+                )
 
 
 def _resolve_url(base_url: str, target: str) -> str:
@@ -270,6 +339,16 @@ def _rewrite_asset_and_page_urls(
         if rewritten:
             tag["action"] = rewritten
 
+    # <frame src> (html4 frame passthrough) loads a whole page, not an
+    # image, so it's proxied like <a href>/<form action> via /proxy - not
+    # /proxy/asset. Only ever present here when the active dialect allows
+    # frames (html2/html3.2 block-strip frame/frameset before this runs).
+    for tag in soup.find_all("frame"):
+        src = tag.get("src")
+        rewritten = _proxy_rewrite(base_url, src, "/proxy")
+        if rewritten:
+            tag["src"] = rewritten
+
 
 # Latin-1 (ISO 8859-1) covers codepoints 0x00-0xFF and is, together with
 # plain ASCII, the full output range per SPEC.md's charset rule - so
@@ -284,17 +363,17 @@ LATIN1_MAX = 0xFF
 # letter + combining mark, not standalone symbols like curly quotes).
 _SMART_PUNCTUATION_MAP = str.maketrans(
     {
-        "\u2018": "'",
-        "\u2019": "'",
-        "\u201c": '"',
-        "\u201d": '"',
-        "\u2013": "-",
-        "\u2014": "--",
-        "\u2026": "...",
-        "\u2022": "*",
-        "\u2122": "(TM)",
-        "\u2605": "*",  # black star (filled rating)
-        "\u2606": "-",  # white star (empty rating)
+        "‘": "'",
+        "’": "'",
+        "“": '"',
+        "”": '"',
+        "–": "-",
+        "—": "--",
+        "…": "...",
+        "•": "*",
+        "™": "(TM)",
+        "★": "*",  # black star (filled rating)
+        "☆": "-",  # white star (empty rating)
     }
 )
 
@@ -457,7 +536,10 @@ def downgrade_html(
 
     _strip_block_tags(soup, warnings, resolved_dialect.block_strip_tags)
     _strip_stylesheet_links(soup, warnings)
-    _strip_style_attributes(soup, warnings, resolved_dialect.allowed_tags)
+    _filter_style_blocks(soup, warnings, resolved_dialect.allows_css)
+    _strip_style_attributes(
+        soup, warnings, resolved_dialect.allowed_tags, resolved_dialect.allows_css
+    )
     _strip_javascript_hrefs(soup, warnings)
     _rewrite_asset_and_page_urls(soup, document.url, warnings, asset_refs)
     _flatten_nested_tables(soup, warnings)
