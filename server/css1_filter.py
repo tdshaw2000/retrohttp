@@ -18,6 +18,22 @@ DISALLOWED_VALUE_PATTERN = re.compile(
     r"\b(calc|rgba|hsla?|var|clamp|min|max|env)\s*\(", re.IGNORECASE
 )
 
+# CSS1 (1996) length units per the spec - anything else (rem, vw/vh/vmin/vmax,
+# ch, fr, q, ...) is CSS2+/CSS3 and must not reach the html4 target clients:
+# Communicator 4.x/IE 4.x (1997) predate every one of those by years and
+# don't recognize them. A bare number or a percentage needs no unit check -
+# they're always valid CSS1. Matches a number immediately followed by a unit
+# suffix, so it can't misfire on unrelated text like font-family keywords.
+_CSS1_LENGTH_UNITS = {"em", "ex", "px", "in", "cm", "mm", "pt", "pc"}
+_DIMENSION_PATTERN = re.compile(r"(?<![\w.-])[+-]?(?:\d+\.?\d*|\.\d+)([a-zA-Z]+)\b")
+
+
+def _has_unsupported_unit(value: str) -> bool:
+    return any(
+        match.group(1).lower() not in _CSS1_LENGTH_UNITS
+        for match in _DIMENSION_PATTERN.finditer(value)
+    )
+
 
 def _is_allowed_property(property_name: str) -> bool:
     lowered = property_name.lower()
@@ -48,7 +64,7 @@ def filter_declarations(declarations: str) -> tuple[str, list[str]]:
             )
             continue
 
-        if DISALLOWED_VALUE_PATTERN.search(value):
+        if DISALLOWED_VALUE_PATTERN.search(value) or _has_unsupported_unit(value):
             warnings.append(
                 f"dropped unsupported CSS value for property '{property_name}'"
             )
