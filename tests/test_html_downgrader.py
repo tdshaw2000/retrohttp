@@ -1,4 +1,5 @@
 import pytest
+from bs4 import BeautifulSoup
 
 from server.html_downgrader import FetchedDocument, downgrade_html
 
@@ -296,7 +297,7 @@ def test_transliterates_extended_latin_beyond_latin1_to_ascii_base_letter():
     # live outside the Latin-1 block) - drop to the closest ASCII base
     # letter rather than passing the raw codepoint through or dropping
     # the letter entirely.
-    html = "<p>Wroc&#322;aw &#382;el&#380;azna Hòa</p>"
+    html = "<p>Wroc&#322;aw &#382;el&#380;azna Hòa</p>"
 
     result = downgrade_html(_document(html))
 
@@ -414,3 +415,127 @@ def test_html2_still_strips_or_unwraps_html3_2_only_tags(kwargs):
     assert "divtext" in result.html
     # ...but map/area are still fully block-stripped in html2, content and all
     assert "/proxy?url=http%3A%2F%2Fexample.com%2Fa" not in result.html
+
+
+def test_html4_retains_and_filters_style_block_content():
+    html = (
+        "<style>body { color: red; grid-template-columns: 1fr; } "
+        "@media screen { p { color: blue; } }</style>"
+        "<p>text</p>"
+    )
+
+    result = downgrade_html(_document(html), dialect="html4")
+
+    assert "<style>" in result.html
+    assert "color: red" in result.html
+    assert "grid-template-columns" not in result.html
+    assert "@media" not in result.html
+    assert "<p>text</p>" in result.html
+    assert any("grid-template-columns" in w for w in result.warnings)
+    assert any("@media" in w for w in result.warnings)
+
+
+def test_html4_drops_style_block_entirely_when_all_declarations_filtered():
+    html = "<style>div { grid-template-columns: 1fr; }</style><p>text</p>"
+
+    result = downgrade_html(_document(html), dialect="html4")
+
+    assert "<style" not in result.html
+    assert "<p>text</p>" in result.html
+    assert any("grid-template-columns" in w for w in result.warnings)
+
+
+def test_html4_retains_and_filters_inline_style_attribute():
+    html = '<p style="color: red; grid-template-columns: 1fr;">styled</p>'
+
+    result = downgrade_html(_document(html), dialect="html4")
+
+    assert 'style="color: red"' in result.html
+    assert "grid-template-columns" not in result.html
+    assert "styled" in result.html
+    assert any("grid-template-columns" in w for w in result.warnings)
+
+
+def test_html4_drops_inline_style_attribute_when_all_declarations_filtered():
+    html = '<p style="grid-template-columns: 1fr;">styled</p>'
+
+    result = downgrade_html(_document(html), dialect="html4")
+
+    assert "style=" not in result.html
+    assert "<p>styled</p>" in result.html
+    assert any("grid-template-columns" in w for w in result.warnings)
+
+
+def test_html4_keeps_frameset_and_frame_tags_and_rewrites_frame_src():
+    html = (
+        '<frameset cols="50%,50%">'
+        '<frame src="http://example.com/nav.html">'
+        '<frame src="http://example.com/main.html">'
+        "</frameset>"
+    )
+
+    result = downgrade_html(_document(html), dialect="html4")
+
+    reparsed = BeautifulSoup(result.html, "lxml")
+    assert reparsed.find("frameset") is not None
+    frames = reparsed.find_all("frame")
+    assert len(frames) == 2
+    srcs = {frame.get("src") for frame in frames}
+    assert srcs == {
+        "/proxy?url=http%3A%2F%2Fexample.com%2Fnav.html",
+        "/proxy?url=http%3A%2F%2Fexample.com%2Fmain.html",
+    }
+
+
+def test_html4_keeps_noframes_tag_content():
+    html = (
+        '<frameset><frame src="a.html"></frameset>'
+        "<noframes><p>Your browser does not support frames.</p></noframes>"
+    )
+
+    result = downgrade_html(_document(html), dialect="html4")
+
+    assert "<noframes>" in result.html
+    assert "Your browser does not support frames." in result.html
+
+
+def test_html4_still_strips_script_and_applet_tags():
+    html = (
+        "<p>before</p>"
+        "<script>alert('hi')</script>"
+        "<applet code='Thing.class'>no java</applet>"
+        "<p>after</p>"
+    )
+
+    result = downgrade_html(_document(html), dialect="html4")
+
+    assert "<script" not in result.html
+    assert "<applet" not in result.html
+    assert "no java" not in result.html
+    assert "<p>before</p>" in result.html
+    assert "<p>after</p>" in result.html
+
+
+def test_html4_still_allows_html3_2_tags():
+    html = "<center><font color='red'>text</font></center>"
+
+    result = downgrade_html(_document(html), dialect="html4")
+
+    assert "<center>" in result.html
+    assert "<font" in result.html
+
+
+def test_html4_still_strips_stylesheet_link_tags():
+    html = '<link rel="stylesheet" href="/site.css"><p>text</p>'
+
+    result = downgrade_html(_document(html), dialect="html4")
+
+    assert "<link" not in result.html
+    assert "<p>text</p>" in result.html
+
+
+def test_invalid_dialect_error_names_html4_option_too():
+    with pytest.raises(ValueError) as exc_info:
+        downgrade_html(_document("<p>hi</p>"), dialect="bogus")
+
+    assert "html4" in str(exc_info.value)
