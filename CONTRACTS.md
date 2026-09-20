@@ -63,30 +63,37 @@ Consumed by: server proxy route (orchestrator-wired, not a subagent)
 
 ```
 DowngradedDocument {
-  html: string          // HTML dialect per SPEC.md — selected html2/html3.2 dialect
+  html: string          // HTML dialect per SPEC.md — selected html2/html3.2/html4 dialect
   asset_refs: [string]  // URLs now rewritten to point at /proxy/asset?url=...
   warnings: [string]    // human-readable notes on what was dropped/flattened
                          // (e.g. "stripped <script> block at offset 4021",
-                         // "flattened nested table to single level")
+                         // "flattened nested table to single level",
+                         // "dropped unsupported CSS property 'grid-template-columns'")
 }
 ```
 
 Notes:
 - `html` must validate against the allowed-tag list for whichever
-  dialect was requested (see SPEC.md's "HTML version selection") — no
-  `<script>`, `<style>`, `style=` attributes, frames, or any tag
-  outside that dialect's allowlist.
+  dialect was requested (see SPEC.md's "HTML version selection") —
+  no `<script>`, or any tag outside that dialect's allowlist. For
+  `html2`/`html3.2`, that also excludes `<style>` and `style=`
+  attributes entirely and frames outright. For `html4`, `<style>`/
+  `style=` and frames (`<frameset>`/`<frame>`/`<noframes>`) are
+  allowed, but every CSS declaration must first pass the CSS1 property
+  allowlist in `server/css1_filter.py` — anything outside it is
+  dropped and reported in `warnings`, never passed through unfiltered.
 - `asset_refs` URLs are what the HTML actually points to after
   rewriting — the proxy route uses these to know what to fetch via
   `asset-converter` on request.
 - `warnings` should be genuinely useful for debugging downgrade
   quality, not just a dump of every tag touched — one line per
-  meaningful decision, not per character stripped.
+  meaningful decision, not per character stripped. This includes
+  every CSS declaration the `html4` filter drops.
 - Actual function signature:
   `downgrade_html(document: FetchedDocument, dialect: str = "html2") -> DowngradedDocument`.
   Valid `dialect` values are `server/html_downgrader.py`'s `DIALECTS`
-  registry keys — currently `"html2"` and `"html3.2"`. An unrecognized
-  value raises `ValueError`.
+  registry keys — currently `"html2"`, `"html3.2"`, and `"html4"`. An
+  unrecognized value raises `ValueError`.
 
 ---
 
@@ -126,7 +133,10 @@ Notes:
   normalize to UTF-8 text plus a list of asset URLs.
 - `html-downgrader` never fetches anything — it receives a
   `FetchedDocument` and returns a `DowngradedDocument`. No network
-  calls.
+  calls. The `html4` CSS1 allowlist filter (`server/css1_filter.py`)
+  lives inside this boundary — it's a mode of `downgrade_html`, not a
+  new pipeline stage or contract, so no new agent/shape is introduced
+  for it.
 - `asset-converter` never parses HTML — it receives asset
   URLs/bytes and returns converted images. No knowledge of the
   surrounding page.
