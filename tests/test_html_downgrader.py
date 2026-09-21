@@ -256,6 +256,27 @@ def test_get_form_action_resolves_to_bare_absolute_url():
     assert "/proxy?url=" not in result.html
 
 
+def test_get_form_action_scheme_is_forced_to_http_even_when_origin_is_https():
+    # A vintage client is never handed an https:// URL for anything -
+    # the proxy fully terminates TLS (see SPEC.md "Proxy / TLS
+    # handling"). <a href>/<img src> never risk this because they stay
+    # relative and inherit whatever scheme the client used to reach the
+    # current page, but a GET-form action has to be absolute to survive
+    # submission (see the comment on the form-handling loop). Left as a
+    # literal https:// URL (the origin's real scheme, since virtually
+    # the whole modern web is https), a vintage browser with no
+    # separate "Security"/HTTPS proxy configured tries a real, direct
+    # TLS handshake to the actual origin and fails - the proxy re-fetches
+    # via its own fetcher regardless of which scheme the client saw, so
+    # the client-facing scheme must always be http.
+    html = "<form action='https://example.com/search' method='get'><input name='q'></form>"
+
+    result = downgrade_html(_document(html))
+
+    assert 'action="http://example.com/search"' in result.html
+    assert "https://" not in result.html
+
+
 def test_form_with_no_method_attribute_defaults_to_get_behavior():
     html = "<form action='http://example.com/search'><input name='q'></form>"
 

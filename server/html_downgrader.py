@@ -302,6 +302,25 @@ def _resolve_proxyable_target(base_url: str, target: str) -> str | None:
     return resolved
 
 
+def _force_http_scheme(url: str) -> str:
+    """Force a client-facing absolute URL's scheme to plain http.
+
+    The vintage client is never given an https:// URL for anything -
+    the proxy fully terminates TLS on the modern side (SPEC.md "Proxy /
+    TLS handling"). <a href>/<img src> never risk this because they
+    stay relative and inherit whatever scheme the client used to reach
+    the current page, but a bare GET-form action (see the form loop in
+    _rewrite_asset_and_page_urls) has to be absolute, and resolving it
+    against the origin's real URL almost always yields https now. A
+    vintage browser with no separate "Security"/HTTPS proxy configured
+    will try a genuine direct TLS handshake to the real origin on such
+    a URL and fail - the proxy re-fetches through its own fetcher
+    regardless of which scheme the client saw, so this is safe.
+    """
+    parsed = urlparse(url)
+    return parsed._replace(scheme="http").geturl()
+
+
 def _proxy_rewrite(base_url: str, target: str, route: str) -> str | None:
     """Rewrite target (an href/src/action value) to a proxy route URL."""
     resolved = _resolve_proxyable_target(base_url, target)
@@ -357,7 +376,8 @@ def _rewrite_asset_and_page_urls(
         # actions unwrapped and let the browser's own proxy
         # configuration deliver its appended query string intact.
         if method == "get":
-            rewritten = _resolve_proxyable_target(base_url, action)
+            resolved = _resolve_proxyable_target(base_url, action)
+            rewritten = _force_http_scheme(resolved) if resolved else None
         else:
             rewritten = _proxy_rewrite(base_url, action, "/proxy")
         if rewritten:
