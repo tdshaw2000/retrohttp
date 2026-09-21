@@ -284,11 +284,11 @@ def _resolve_url(base_url: str, target: str) -> str:
     return urljoin(base_url, target)
 
 
-def _proxy_rewrite(base_url: str, target: str, route: str) -> str | None:
-    """Rewrite target (an href/src/action value) to a proxy route URL.
+def _resolve_proxyable_target(base_url: str, target: str) -> str | None:
+    """Resolve target (an href/src/action value) to an absolute URL.
 
     Returns None if target should be left untouched (fragment-only,
-    mailto:/tel:, empty, or already a proxy route).
+    mailto:/tel:, or empty).
     """
     if not target or target.strip().startswith("#"):
         return None
@@ -297,6 +297,15 @@ def _proxy_rewrite(base_url: str, target: str, route: str) -> str | None:
     scheme = urlparse(resolved).scheme.lower()
 
     if scheme in NON_PROXIED_SCHEMES:
+        return None
+
+    return resolved
+
+
+def _proxy_rewrite(base_url: str, target: str, route: str) -> str | None:
+    """Rewrite target (an href/src/action value) to a proxy route URL."""
+    resolved = _resolve_proxyable_target(base_url, target)
+    if resolved is None:
         return None
 
     return f"{route}?url={quote(resolved, safe='')}"
@@ -337,7 +346,20 @@ def _rewrite_asset_and_page_urls(
 
     for tag in soup.find_all("form"):
         action = tag.get("action")
-        rewritten = _proxy_rewrite(base_url, action, "/proxy")
+        method = (tag.get("method") or "get").strip().lower()
+        # A GET-method form submission replaces the action URL's
+        # existing query string with the serialized field data (per the
+        # HTML spec, not a browser quirk) - so wrapping the action in
+        # /proxy?url=<target> the way <a href>/<img src> do would have
+        # its url= param silently discarded on submit, losing the real
+        # target. handle_proxy_request() already treats a bare absolute
+        # URL as a direct page fetch (see proxy.py), so leave GET
+        # actions unwrapped and let the browser's own proxy
+        # configuration deliver its appended query string intact.
+        if method == "get":
+            rewritten = _resolve_proxyable_target(base_url, action)
+        else:
+            rewritten = _proxy_rewrite(base_url, action, "/proxy")
         if rewritten:
             tag["action"] = rewritten
 

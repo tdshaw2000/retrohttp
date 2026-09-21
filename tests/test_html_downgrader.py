@@ -241,12 +241,36 @@ def test_img_with_no_width_attribute_is_untouched():
     assert "height=" not in result.html
 
 
-def test_rewrites_form_action_to_proxy_page_route():
+def test_get_form_action_resolves_to_bare_absolute_url():
+    # GET-form submission replaces the action URL's existing query
+    # string with the serialized field data, so wrapping the action in
+    # /proxy?url=... (as done for <a href>/<img src>) would silently
+    # discard the real target when the browser submits the form.
+    # handle_proxy_request() already treats a bare absolute URL as a
+    # direct page fetch, so the action must stay unwrapped here.
     html = "<form action='http://example.com/search' method='get'><input name='q'></form>"
 
     result = downgrade_html(_document(html))
 
-    expected = "/proxy?url=http%3A%2F%2Fexample.com%2Fsearch"
+    assert 'action="http://example.com/search"' in result.html
+    assert "/proxy?url=" not in result.html
+
+
+def test_form_with_no_method_attribute_defaults_to_get_behavior():
+    html = "<form action='http://example.com/search'><input name='q'></form>"
+
+    result = downgrade_html(_document(html))
+
+    assert 'action="http://example.com/search"' in result.html
+    assert "/proxy?url=" not in result.html
+
+
+def test_post_form_action_still_uses_proxy_page_route():
+    html = "<form action='http://example.com/submit' method='post'><input name='q'></form>"
+
+    result = downgrade_html(_document(html))
+
+    expected = "/proxy?url=http%3A%2F%2Fexample.com%2Fsubmit"
     assert expected in result.html
 
 
