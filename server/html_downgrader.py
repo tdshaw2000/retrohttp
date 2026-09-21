@@ -6,6 +6,7 @@ from urllib.parse import quote, urljoin, urlparse
 
 from bs4 import BeautifulSoup, NavigableString
 
+from server.asset_converter import MAX_WIDTH
 from server.contracts import DowngradedDocument, FetchedDocument
 from server.css1_filter import filter_declarations, filter_stylesheet
 
@@ -323,6 +324,7 @@ def _rewrite_asset_and_page_urls(
         if rewritten:
             tag["src"] = rewritten
             asset_refs.append(rewritten)
+        _clamp_img_width_attribute(tag)
 
     # <area href> (html3.2 image maps) is a real followable link, exactly
     # like <a href> - only ever present in the tree here when the active
@@ -348,6 +350,32 @@ def _rewrite_asset_and_page_urls(
         rewritten = _proxy_rewrite(base_url, src, "/proxy")
         if rewritten:
             tag["src"] = rewritten
+
+
+def _clamp_img_width_attribute(tag) -> None:
+    """Clamp a stale `width` attribute to MAX_WIDTH.
+
+    Source pages often carry `width`/`height` attributes sized for the
+    original image, but `asset-converter` independently downscales the
+    served bytes to fit MAX_WIDTH/MAX_HEIGHT (see asset_converter.py).
+    Left alone, the target browser stretches the (correctly shrunk)
+    image back up to the stale attribute value. Only bare-integer
+    widths are touched - relative values like "100%" aren't a
+    fixed-pixel overflow risk and are left as-is.
+    """
+    width = tag.get("width")
+    if width is None or not width.isdigit():
+        return
+
+    width = int(width)
+    if width <= MAX_WIDTH:
+        return
+
+    height = tag.get("height")
+    if height is not None and height.isdigit():
+        tag["height"] = str(round(int(height) * MAX_WIDTH / width))
+
+    tag["width"] = str(MAX_WIDTH)
 
 
 # Latin-1 (ISO 8859-1) covers codepoints 0x00-0xFF and is, together with
