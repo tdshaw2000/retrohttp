@@ -69,12 +69,13 @@ def _handle_page(url: str, dialect: str) -> ProxyResult:
     except FetchError:
         return ProxyResult(STATUS_UPSTREAM_UNREACHABLE, "text/plain", b"Upstream fetch failed")
 
-    if document.status == 200:
+    if document.status in (200, STATUS_UPSTREAM_NOT_FOUND, STATUS_UPSTREAM_FORBIDDEN):
+        # Forward the origin's own error page rather than a blank body -
+        # a real HTTP status with a zero-byte body is exactly what makes
+        # a vintage browser report "this document contains no data".
         downgraded = downgrade_html(document, dialect=dialect)
-        return ProxyResult(200, "text/html", downgraded.html.encode("latin-1", errors="replace"))
-
-    if document.status in (STATUS_UPSTREAM_NOT_FOUND, STATUS_UPSTREAM_FORBIDDEN):
-        return ProxyResult(document.status, "text/plain", b"")
+        body = downgraded.html.encode("latin-1", errors="replace")
+        return ProxyResult(document.status, "text/html", body)
 
     return ProxyResult(STATUS_UPSTREAM_UNREACHABLE, "text/plain", b"Upstream error")
 

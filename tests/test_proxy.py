@@ -93,6 +93,42 @@ def test_passes_through_upstream_404(tmp_path):
     assert result.status == 404
 
 
+def test_upstream_404_forwards_downgraded_origin_body(tmp_path):
+    # Blanking the body here (as opposed to forwarding the origin's own
+    # error page, downgraded like any other page) is what makes a
+    # vintage browser report "this document contains no data" - a
+    # zero-byte body, not a status code, is what triggers that.
+    routes = {
+        "/missing": {
+            "status": 404,
+            "headers": {"Content-Type": "text/html; charset=utf-8"},
+            "body": b"<html><body><h1>Page Not Found</h1></body></html>",
+        }
+    }
+
+    with run_server(routes) as base_url:
+        result = handle_proxy_request(f"{base_url}/missing", AssetCache(tmp_path))
+
+    assert result.status == 404
+    assert b"Page Not Found" in result.body
+
+
+def test_upstream_403_forwards_downgraded_origin_body(tmp_path):
+    routes = {
+        "/blocked": {
+            "status": 403,
+            "headers": {"Content-Type": "text/html; charset=utf-8"},
+            "body": b"<html><body><h1>Access Denied</h1></body></html>",
+        }
+    }
+
+    with run_server(routes) as base_url:
+        result = handle_proxy_request(f"{base_url}/blocked", AssetCache(tmp_path))
+
+    assert result.status == 403
+    assert b"Access Denied" in result.body
+
+
 def test_unreachable_host_returns_500(tmp_path):
     dead_port = _unused_port()
 
