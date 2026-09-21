@@ -39,8 +39,18 @@ class _FixtureRequestHandler(BaseHTTPRequestHandler):
 
 
 @contextmanager
-def run_server(routes: dict):
-    handler_class = type("FixtureHandler", (_FixtureRequestHandler,), {"routes": routes})
+def run_server(routes: dict, captured_headers: list | None = None):
+    handler_attrs = {"routes": routes}
+    if captured_headers is not None:
+        base_do_get = _FixtureRequestHandler.do_GET
+
+        def do_GET(self):
+            captured_headers.append(dict(self.headers))
+            base_do_get(self)
+
+        handler_attrs["do_GET"] = do_GET
+
+    handler_class = type("FixtureHandler", (_FixtureRequestHandler,), handler_attrs)
     server = HTTPServer(("127.0.0.1", 0), handler_class)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -211,6 +221,51 @@ def test_fetch_asset_raises_fetch_error_for_unreachable_host():
 
     with pytest.raises(FetchError):
         fetch_asset(f"http://127.0.0.1:{dead_port}/pic.png", timeout=1)
+
+
+def test_fetch_document_sends_a_tool_identifying_user_agent():
+    # Some origins (Wikipedia's robot policy, for one) outright reject
+    # the requests-library default UA ("python-requests/x.y") with a
+    # 403 asking for a descriptive UA. This must identify the tool
+    # honestly - not impersonate a real browser (see server/fetcher.py's
+    # comment on why: that flips JS-capability-sniffing sites like
+    # Google into serving their full JS-dependent app instead of a
+    # simple fallback).
+    routes = {
+        "/simple": {
+            "status": 200,
+            "headers": {"Content-Type": "text/html; charset=utf-8"},
+            "body": b"<html></html>",
+        }
+    }
+    captured_headers: list = []
+
+    with run_server(routes, captured_headers=captured_headers) as base_url:
+        fetch_document(f"{base_url}/simple")
+
+    user_agent = captured_headers[0].get("User-Agent", "")
+    assert "python-requests" not in user_agent
+    assert "Mozilla" not in user_agent
+    assert "retrohttp" in user_agent.lower()
+
+
+def test_fetch_asset_sends_a_tool_identifying_user_agent():
+    routes = {
+        "/pic.png": {
+            "status": 200,
+            "headers": {"Content-Type": "image/png"},
+            "body": b"\x89PNG\r\n\x1a\nfake-png-bytes",
+        }
+    }
+    captured_headers: list = []
+
+    with run_server(routes, captured_headers=captured_headers) as base_url:
+        fetch_asset(f"{base_url}/pic.png")
+
+    user_agent = captured_headers[0].get("User-Agent", "")
+    assert "python-requests" not in user_agent
+    assert "Mozilla" not in user_agent
+    assert "retrohttp" in user_agent.lower()
 
 
 def test_fetch_raises_fetch_error_instead_of_hanging_on_slow_host():

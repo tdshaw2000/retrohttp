@@ -8,6 +8,23 @@ from server.contracts import FetchedAsset, FetchedDocument
 
 DEFAULT_TIMEOUT_SECONDS = 10.0
 
+# Sent to the real (modern) origin on every outbound fetch - this is the
+# proxy's own client identity to the live web, unrelated to the vintage
+# client's identity, which never reaches the origin.
+#
+# This must honestly identify the tool, not impersonate a real browser.
+# Some origins (Wikipedia's robot policy, for one) reject the requests
+# library's own default UA ("python-requests/x.y") outright as an
+# unlabeled bot. But spoofing an actual browser UA is worse: it was
+# tried and reverted (see git history) because JS-capability-sniffing
+# sites like Google read "real modern browser" as license to serve
+# their full JS-dependent app instead of a plain fallback, which this
+# proxy then can't downgrade into anything usable. A tool-labeled UA
+# satisfies "identify yourself" bot policies without claiming to be a
+# browser capable of running their JS.
+DEFAULT_USER_AGENT = "retrohttp/1.0 (+https://github.com/tdshaw2000/retrohttp)"
+_REQUEST_HEADERS = {"User-Agent": DEFAULT_USER_AGENT}
+
 
 class FetchError(Exception):
     pass
@@ -27,7 +44,7 @@ _TAG_PATTERN = re.compile(
 
 def fetch_asset(url: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> FetchedAsset:
     try:
-        response = requests.get(url, timeout=timeout)
+        response = requests.get(url, timeout=timeout, headers=_REQUEST_HEADERS)
     except requests.exceptions.RequestException as error:
         raise FetchError(f"failed to fetch {url}: {error}") from error
 
@@ -37,7 +54,7 @@ def fetch_asset(url: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> FetchedAs
 
 def fetch_document(url: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> FetchedDocument:
     try:
-        response = requests.get(url, timeout=timeout)
+        response = requests.get(url, timeout=timeout, headers=_REQUEST_HEADERS)
     except requests.exceptions.RequestException as error:
         raise FetchError(f"failed to fetch {url}: {error}") from error
 
