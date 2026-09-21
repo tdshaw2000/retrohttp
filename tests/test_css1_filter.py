@@ -63,20 +63,71 @@ def test_viewport_units_are_dropped_as_unsupported():
 
 def test_css1_length_units_still_pass_through():
     filtered, warnings = filter_declarations(
-        "font-size: 1.2em; width: 10px; margin: 0.5in; padding: 2ex 1pc 3pt 4cm"
+        "width: 10px; margin: 0.5in; padding: 2ex 1pc 3pt 4cm"
     )
 
-    assert filtered == (
-        "font-size: 1.2em; width: 10px; margin: 0.5in; "
-        "padding: 2ex 1pc 3pt 4cm"
-    )
+    assert filtered == "width: 10px; margin: 0.5in; padding: 2ex 1pc 3pt 4cm"
     assert warnings == []
 
 
 def test_percentage_values_still_pass_through():
-    filtered, warnings = filter_declarations("width: 50%; font-size: 110%")
+    filtered, warnings = filter_declarations("width: 50%; margin: 10%")
 
-    assert filtered == "width: 50%; font-size: 110%"
+    assert filtered == "width: 50%; margin: 10%"
+    assert warnings == []
+
+
+def test_font_size_percentage_is_dropped():
+    # Netscape 4.x compounds relative font-size values at every level of a
+    # matched ancestor chain, even a nominally-neutral 100% (confirmed on
+    # real hardware against bbc.co.uk/football's global nav CSS reset -
+    # see #2). This is a genuine NN4 bug: percentage font-size should mean
+    # exactly "same as parent," not runaway growth.
+    filtered, warnings = filter_declarations("font-size: 100%")
+
+    assert filtered == ""
+    assert warnings == ["dropped unsupported CSS value for property 'font-size'"]
+
+
+def test_font_size_em_is_dropped():
+    # em compounding down nested elements is correct CSS1 behavior
+    # everywhere (1em always means "size of immediate parent"), not just
+    # an NN4 bug - but it produces the same runaway-growth symptom on
+    # deeply nested markup, confirmed on real hardware (#2).
+    filtered, warnings = filter_declarations("font-size: 1.2em")
+
+    assert filtered == ""
+    assert warnings == ["dropped unsupported CSS value for property 'font-size'"]
+
+
+def test_font_size_ex_is_dropped():
+    filtered, warnings = filter_declarations("font-size: 2ex")
+
+    assert filtered == ""
+    assert warnings == ["dropped unsupported CSS value for property 'font-size'"]
+
+
+def test_font_size_relative_keywords_are_dropped():
+    filtered, warnings = filter_declarations("font-size: larger")
+    assert filtered == ""
+    assert warnings == ["dropped unsupported CSS value for property 'font-size'"]
+
+    filtered, warnings = filter_declarations("font-size: smaller")
+    assert filtered == ""
+    assert warnings == ["dropped unsupported CSS value for property 'font-size'"]
+
+
+def test_font_size_px_still_passes():
+    filtered, warnings = filter_declarations("font-size: 14px")
+
+    assert filtered == "font-size: 14px"
+    assert warnings == []
+
+
+def test_font_size_absolute_keyword_still_passes():
+    filtered, warnings = filter_declarations("font-size: large")
+
+    assert filtered == "font-size: large"
     assert warnings == []
 
 
