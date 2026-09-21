@@ -197,6 +197,50 @@ def test_rewrites_anchor_href_to_proxy_page_route():
     assert result.asset_refs == []
 
 
+def test_clamps_oversized_img_width_attribute_to_800():
+    html = "<img src='pics/photo.gif' width='1200' height='800'>"
+
+    result = downgrade_html(_document(html))
+
+    assert 'width="800"' in result.html
+    assert 'height="533"' in result.html
+
+
+def test_leaves_img_width_within_cap_untouched():
+    html = "<img src='pics/photo.gif' width='600' height='400'>"
+
+    result = downgrade_html(_document(html))
+
+    assert 'width="600"' in result.html
+    assert 'height="400"' in result.html
+
+
+def test_clamps_width_with_no_height_attribute_present():
+    html = "<img src='pics/photo.gif' width='1600'>"
+
+    result = downgrade_html(_document(html))
+
+    assert 'width="800"' in result.html
+    assert "height=" not in result.html
+
+
+def test_ignores_non_numeric_width_attribute():
+    html = "<img src='pics/photo.gif' width='100%'>"
+
+    result = downgrade_html(_document(html))
+
+    assert 'width="100%"' in result.html
+
+
+def test_img_with_no_width_attribute_is_untouched():
+    html = "<img src='pics/photo.gif' alt='a photo'>"
+
+    result = downgrade_html(_document(html))
+
+    assert "width=" not in result.html
+    assert "height=" not in result.html
+
+
 def test_rewrites_form_action_to_proxy_page_route():
     html = "<form action='http://example.com/search' method='get'><input name='q'></form>"
 
