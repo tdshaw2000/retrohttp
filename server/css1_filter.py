@@ -35,6 +35,29 @@ def _has_unsupported_unit(value: str) -> bool:
     )
 
 
+# font-size specifically excludes every CSS1-legal *relative* expression -
+# %, em, ex, and the larger/smaller keywords - even though CSS1 permits
+# them on this property. Confirmed on real Netscape 4.x hardware (#2):
+# a relative font-size rule matched against a direct ancestor chain
+# (e.g. a CSS reset hitting html/body/div/.../a) compounds at every
+# level, turning even a nominally-neutral `font-size: 100%` into
+# runaway growth. em/ex compounding down nested elements is correct
+# CSS1 behavior everywhere, not just an NN4 bug, but it produces the
+# same symptom on deeply nested markup - so both are excluded here.
+_RELATIVE_FONT_SIZE_UNIT_PATTERN = re.compile(
+    r"(?<![\w.-])[+-]?(?:\d+\.?\d*|\.\d+)(em|ex)\b", re.IGNORECASE
+)
+_RELATIVE_FONT_SIZE_KEYWORDS = {"larger", "smaller"}
+
+
+def _is_relative_font_size(value: str) -> bool:
+    if "%" in value:
+        return True
+    if _RELATIVE_FONT_SIZE_UNIT_PATTERN.search(value):
+        return True
+    return value.strip().lower() in _RELATIVE_FONT_SIZE_KEYWORDS
+
+
 def _is_allowed_property(property_name: str) -> bool:
     lowered = property_name.lower()
     if lowered in ALLOWED_PROPERTIES:
@@ -64,7 +87,14 @@ def filter_declarations(declarations: str) -> tuple[str, list[str]]:
             )
             continue
 
-        if DISALLOWED_VALUE_PATTERN.search(value) or _has_unsupported_unit(value):
+        is_relative_font_size = (
+            property_name.lower() == "font-size" and _is_relative_font_size(value)
+        )
+        if (
+            DISALLOWED_VALUE_PATTERN.search(value)
+            or _has_unsupported_unit(value)
+            or is_relative_font_size
+        ):
             warnings.append(
                 f"dropped unsupported CSS value for property '{property_name}'"
             )
