@@ -15,6 +15,12 @@ STATUS_UPSTREAM_UNREACHABLE = 500
 STATUS_UPSTREAM_NOT_FOUND = 404
 STATUS_UPSTREAM_FORBIDDEN = 403
 
+UPSTREAM_UNREACHABLE_MESSAGE = (
+    b"Unable to locate the server. The address may be incorrect, or "
+    b"the server may be unreachable or uncommunicative. Please check "
+    b"the address and try again."
+)
+
 
 @dataclass
 class ProxyResult:
@@ -67,7 +73,7 @@ def _handle_page(url: str, dialect: str) -> ProxyResult:
     try:
         document = fetch_document(url)
     except FetchError:
-        return ProxyResult(STATUS_UPSTREAM_UNREACHABLE, "text/plain", b"Upstream fetch failed")
+        return ProxyResult(STATUS_UPSTREAM_UNREACHABLE, "text/plain", UPSTREAM_UNREACHABLE_MESSAGE)
 
     if document.status in (200, STATUS_UPSTREAM_NOT_FOUND, STATUS_UPSTREAM_FORBIDDEN):
         # Forward the origin's own error page rather than a blank body -
@@ -84,7 +90,7 @@ def _handle_asset(url: str, asset_cache: AssetCache) -> ProxyResult:
     try:
         converted = asset_cache.get_or_fetch(url)
     except FetchError:
-        return ProxyResult(STATUS_UPSTREAM_UNREACHABLE, "text/plain", b"Upstream fetch failed")
+        return ProxyResult(STATUS_UPSTREAM_UNREACHABLE, "text/plain", UPSTREAM_UNREACHABLE_MESSAGE)
     except AssetConversionError:
         return ProxyResult(STATUS_UPSTREAM_NOT_FOUND, "text/plain", b"")
 

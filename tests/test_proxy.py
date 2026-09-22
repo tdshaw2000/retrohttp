@@ -139,6 +139,34 @@ def test_unreachable_host_returns_500(tmp_path):
     assert result.status == 500
 
 
+def test_unreachable_host_shows_a_reader_friendly_message(tmp_path):
+    dead_port = _unused_port()
+
+    result = handle_proxy_request(
+        f"http://127.0.0.1:{dead_port}/x", AssetCache(tmp_path)
+    )
+
+    assert result.body == (
+        b"Unable to locate the server. The address may be incorrect, or "
+        b"the server may be unreachable or uncommunicative. Please check "
+        b"the address and try again."
+    )
+
+
+def test_unreachable_host_asset_shows_a_reader_friendly_message(tmp_path):
+    dead_port = _unused_port()
+
+    target = _proxy_route("/proxy/asset", f"http://127.0.0.1:{dead_port}/pic.png")
+    result = handle_proxy_request(target, AssetCache(tmp_path))
+
+    assert result.status == 500
+    assert result.body == (
+        b"Unable to locate the server. The address may be incorrect, or "
+        b"the server may be unreachable or uncommunicative. Please check "
+        b"the address and try again."
+    )
+
+
 def test_proxy_route_with_url_query_param_resolves_real_target(tmp_path):
     routes = {
         "/page": {
