@@ -46,24 +46,25 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def configure_js_rendering(render_js: bool, probe=engine_mode):
+    """The renderer to use (or None) and how to describe it at startup."""
+    if not render_js:
+        return None, "off"
+    mode = probe()
+    if mode == "sandboxed":
+        return JsRenderer(sandbox=True), "on"
+    if mode == "unsandboxed":
+        return JsRenderer(sandbox=False), "on (this system can't run the browser's sandbox)"
+    return None, "on, but the engine is not installed"
+
+
 def main() -> None:
     args = build_parser().parse_args()
 
     docroot = args.docroot.resolve() if args.docroot else None
     asset_cache = AssetCache(Path(tempfile.mkdtemp(prefix="retrohttp-assets-")))
 
-    js_renderer = None
-    js_rendering = "off"
-    if args.render_js:
-        mode = engine_mode()
-        if mode == "sandboxed":
-            js_renderer = JsRenderer(sandbox=True)
-            js_rendering = "on"
-        elif mode == "unsandboxed":
-            js_renderer = JsRenderer(sandbox=False)
-            js_rendering = "on (this system can't run the browser's sandbox)"
-        else:
-            js_rendering = "on, but the engine is not installed"
+    js_renderer, js_rendering = configure_js_rendering(args.render_js)
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
         listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

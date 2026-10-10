@@ -356,6 +356,7 @@ def test_webrtc_cannot_open_connections_to_the_local_network():
         time.sleep(0.5)
 
     assert rendered is not None
+    assert b"rtc:undefined" in rendered.html
     assert accepted == []
 
 

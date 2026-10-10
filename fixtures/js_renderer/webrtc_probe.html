@@ -6,7 +6,8 @@
 <script>
   // A hostile page using a TURN-over-TCP server to reach the local network.
   // __TURN__ is replaced by the test with a listener on a loopback address.
-  document.getElementById("root").innerHTML = "<p>Rendered by script</p>";
+  document.getElementById("root").innerHTML =
+    "<p>Rendered by script</p><p>rtc:" + typeof RTCPeerConnection + "</p>";
   try {
     var pc = new RTCPeerConnection({
       iceServers: [{ urls: "__TURN__", username: "u", credential: "c" }]
