@@ -337,24 +337,31 @@ def _proxy_rewrite(base_url: str, target: str, route: str) -> str | None:
     return f"{route}?url={quote(resolved, safe='')}"
 
 
-_META_REFRESH_URL_PATTERN = re.compile(
-    r"""^\s*\d[\d.]*\s*[;,]\s*(?:url\s*=\s*)?["']?([^"']*)["']?\s*$""",
-    re.IGNORECASE,
-)
-
-
 # A 0-second refresh is hard to escape on a vintage client; a few seconds
 # lets the reader see the page and stop it.
 MIN_REFRESH_DELAY_SECONDS = 3
 
 
 def _meta_refresh_target(content: str | None) -> str | None:
+    """The URL in a refresh `content` like `5; URL='/next'`, or None.
+
+    Plain string splitting rather than a regex: a backtracking pattern
+    over attacker-controlled whitespace can take seconds per page, and
+    the proxy serves every client from the same process.
+    """
     if not content:
         return None
-    match = _META_REFRESH_URL_PATTERN.match(content)
-    if not match or not match.group(1).strip():
+    separator = min((i for i in (content.find(";"), content.find(",")) if i >= 0), default=-1)
+    if separator < 0:
         return None
-    return match.group(1).strip()
+    delay, rest = content[:separator].strip(), content[separator + 1 :].strip()
+    if not delay or not delay[0].isdigit() or not all(c.isdigit() or c == "." for c in delay):
+        return None
+    if rest[:3].lower() == "url" and rest[3:].lstrip().startswith("="):
+        rest = rest[3:].lstrip()[1:].strip()
+    if len(rest) >= 2 and rest[0] == rest[-1] and rest[0] in "\"'":
+        rest = rest[1:-1].strip()
+    return rest or None
 
 
 def _ensure_body(soup: BeautifulSoup):
