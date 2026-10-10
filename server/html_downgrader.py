@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from urllib.parse import quote, urljoin, urlparse
 
 from bs4 import BeautifulSoup, NavigableString
+from bs4.element import PreformattedString
 
 from server.asset_converter import MAX_WIDTH
 from server.contracts import DowngradedDocument, FetchedDocument
@@ -57,6 +58,10 @@ ALLOWED_TAGS = {
     "th",
     "form",
     "input",
+    # Only <meta http-equiv="refresh"> survives (see _handle_meta_tags);
+    # RFC 1866 HTML 2.0 defines META/HTTP-EQUIV, and Netscape 1.1's
+    # "client pull" honors refresh.
+    "meta",
     "select",
     "option",
     "textarea",
@@ -80,10 +85,12 @@ _VOID_TAG_PATTERN = re.compile(
 )
 
 
+# <noscript> is deliberately absent: no target client runs JS, so its
+# content is exactly the fallback the origin meant for this reader - it
+# is unwrapped like any other wrapper (see _unwrap_disallowed_tags).
 BLOCK_STRIP_TAGS = {
     "script",
     "style",
-    "noscript",
     "frame",
     "frameset",
     "canvas",
@@ -328,6 +335,200 @@ def _proxy_rewrite(base_url: str, target: str, route: str) -> str | None:
         return None
 
     return f"{route}?url={quote(resolved, safe='')}"
+
+
+# A 0-second refresh is hard to escape on a vintage client; a few seconds
+# lets the reader see the page and stop it.
+MIN_REFRESH_DELAY_SECONDS = 3
+
+
+_ASCII_DIGITS = frozenset("0123456789")
+# int() refuses very long digit strings; nobody needs a refresh this long.
+_MAX_DELAY_DIGITS = 6
+
+
+def _parse_meta_refresh(content: str | None) -> tuple[int, str] | None:
+    """(delay seconds, URL) from a refresh `content` like `5; URL='/next'`.
+
+    Plain string splitting rather than a regex: a backtracking pattern
+    over attacker-controlled whitespace can take seconds per page, and
+    the proxy serves every client from the same process.
+    """
+    if not content:
+        return None
+    separator = min((i for i in (content.find(";"), content.find(",")) if i >= 0), default=-1)
+    if separator < 0:
+        return None
+    delay, rest = content[:separator].strip(), content[separator + 1 :].strip()
+    whole_seconds = delay.split(".", 1)[0]
+    if not whole_seconds or not set(delay) <= _ASCII_DIGITS | {"."}:
+        return None
+    if rest[:3].lower() == "url" and rest[3:].lstrip().startswith("="):
+        rest = rest[3:].lstrip()[1:].strip()
+    if len(rest) >= 2 and rest[0] == rest[-1] and rest[0] in "\"'":
+        rest = rest[1:-1].strip()
+    if not rest:
+        return None
+    return int(whole_seconds[:_MAX_DELAY_DIGITS]), rest
+
+
+def _ensure_body(soup: BeautifulSoup):
+    """The document's <body>, created if missing. None for a frameset page
+    (html4 frame passthrough), whose content lives in the frames."""
+    if soup.find("frameset") is not None:
+        return None
+    if soup.body is None:
+        (soup.html or soup).append(soup.new_tag("body"))
+    return soup.body
+
+
+# What a <head> may hold. Anything else there (typically the content of an
+# unwrapped <noscript>, which lxml leaves in <head>) belongs in <body>.
+_HEAD_CONTENT_TAGS = {"title", "meta", "base", "link", "style", "script", "isindex"}
+
+
+def _move_body_content_out_of_head(soup: BeautifulSoup) -> None:
+    if soup.head is None:
+        return
+    strays = []
+    for child in soup.head.contents:
+        if child.name is None:
+            if isinstance(child, PreformattedString) or not child.strip():
+                continue
+        elif child.name in _HEAD_CONTENT_TAGS:
+            continue
+        strays.append(child)
+    body = _ensure_body(soup) if strays else None
+    if body is None:
+        return
+    for index, child in enumerate(strays):
+        body.insert(index, child.extract())
+
+
+def _handle_meta_tags(soup: BeautifulSoup, base_url: str, warnings: list):
+    """Keep only <meta http-equiv="refresh">, rewritten through the proxy.
+
+    Everything else (<meta charset>, viewport, og:*, ...) is dropped -
+    SPEC.md rules out <meta charset> and the rest mean nothing to target
+    clients. A refresh is how JS-heavy sites (Facebook, for one) send a
+    no-JS browser to their fallback page from inside <noscript>, so it is
+    kept with its URL proxied, and a plain link to the same target is put
+    at the top of <body> for clients that don't honor refresh (Mosaic).
+
+    Returns that link's paragraph and its unproxied target (or Nones), so
+    _drop_refresh_over_content can tell it apart from the page's content.
+    """
+    refresh_links = []
+    for tag in soup.find_all("meta"):
+        http_equiv = (tag.get("http-equiv") or "").strip().lower()
+        parsed = _parse_meta_refresh(tag.get("content")) if http_equiv == "refresh" else None
+        resolved = _resolve_proxyable_target(base_url, parsed[1]) if parsed else None
+        if not resolved:
+            tag.decompose()
+            continue
+        # Left unproxied: _rewrite_asset_and_page_urls proxies <a href>.
+        refresh_links.append(resolved)
+        # The fetcher keeps no cookies, so a refresh back to the same
+        # path (Facebook's /?_fb_noscript=1 from /) can serve the same
+        # shell again and loop forever; keep only the visible link then.
+        target_parts, page_parts = urlparse(resolved), urlparse(base_url)
+        if (target_parts.netloc, target_parts.path) == (page_parts.netloc, page_parts.path):
+            tag.decompose()
+            continue
+        delay = max(parsed[0], MIN_REFRESH_DELAY_SECONDS)
+        rewritten = _proxy_rewrite(base_url, resolved, "/proxy")
+        tag.attrs = {"http-equiv": "Refresh", "content": f"{delay}; URL={rewritten}"}
+        # RFC 1866 only allows META in HEAD.
+        if soup.head is not None and all(p is not soup.head for p in tag.parents):
+            soup.head.append(tag.extract())
+
+    body = _ensure_body(soup) if refresh_links else None
+    if body is None:
+        return None, None
+    notice = soup.new_tag("p")
+    notice.append(NavigableString("This page redirects to "))
+    link = soup.new_tag("a", href=refresh_links[0])
+    link.append(NavigableString("the next page"))
+    notice.append(link)
+    notice.append(NavigableString("."))
+    body.insert(0, notice)
+    warnings.append("kept <meta> refresh with proxied URL and added a visible link to it")
+    return notice, refresh_links[0]
+
+
+def _drop_refresh_over_content(
+    soup: BeautifulSoup, refresh_notice, refresh_target, base_url: str, warnings: list
+) -> None:
+    """Only auto-refresh a page that has nothing else to show.
+
+    A server-rendered article with a <noscript> refresh to an "enable
+    JavaScript" page should stay readable; the visible link is enough.
+    """
+    if refresh_notice is None:
+        return
+    if not _has_visible_content(soup.body, ignore=refresh_notice):
+        return
+    refreshes = soup.find_all("meta")
+    for tag in refreshes:
+        tag.decompose()
+    # A periodic self-reload (news front pages) isn't a redirect at all.
+    target = urlparse(refresh_target)
+    page = urlparse(base_url)
+    if (target.netloc, target.path) == (page.netloc, page.path):
+        refresh_notice.decompose()
+    if refreshes:
+        warnings.append("dropped <meta> refresh because the page has its own content")
+
+
+# Images this small are tracking/beacon pixels, not visible content.
+_INVISIBLE_IMAGE_SIZES = {"0", "1"}
+
+
+# Text inside these is never shown on the page.
+_NON_RENDERED_TEXT_PARENTS = {"style", "title", "script"}
+
+
+def _has_visible_content(body, ignore=None) -> bool:
+    """True if body shows anything, leaving out the `ignore` subtree."""
+
+    def counts(node) -> bool:
+        return all(parent is not ignore for parent in node.parents)
+
+    for text in body.find_all(string=True):
+        # Comments, CDATA, doctypes etc. are never rendered.
+        if isinstance(text, PreformattedString):
+            continue
+        if text.strip() and text.parent.name not in _NON_RENDERED_TEXT_PARENTS and counts(text):
+            return True
+    for tag in body.find_all(["img", "input", "select", "textarea"]):
+        if not counts(tag):
+            continue
+        if tag.name == "input" and (tag.get("type") or "").lower() == "hidden":
+            continue
+        if tag.name == "img" and (
+            tag.get("width") in _INVISIBLE_IMAGE_SIZES
+            or tag.get("height") in _INVISIBLE_IMAGE_SIZES
+        ):
+            continue
+        return True
+    return False
+
+
+EMPTY_PAGE_NOTICE = (
+    "This page has no content this browser can display. The site most "
+    "likely builds its pages with JavaScript, which the proxy does not run."
+)
+
+
+def _add_empty_page_notice(soup: BeautifulSoup, warnings: list) -> None:
+    """Say so when nothing visible survived, instead of serving a blank page."""
+    body = _ensure_body(soup)
+    if body is None or _has_visible_content(body):
+        return
+    notice = soup.new_tag("p")
+    notice.append(NavigableString(EMPTY_PAGE_NOTICE))
+    body.insert(0, notice)
+    warnings.append("no visible content survived downgrading; added an explanatory notice")
 
 
 def _strip_javascript_hrefs(soup: BeautifulSoup, warnings: list) -> None:
@@ -605,18 +806,24 @@ def downgrade_html(
     soup = BeautifulSoup(html_text, "lxml")
 
     _strip_block_tags(soup, warnings, resolved_dialect.block_strip_tags)
+    _move_body_content_out_of_head(soup)
     _strip_stylesheet_links(soup, warnings)
     _filter_style_blocks(soup, warnings, resolved_dialect.allows_css)
     _strip_style_attributes(
         soup, warnings, resolved_dialect.allowed_tags, resolved_dialect.allows_css
     )
     _strip_javascript_hrefs(soup, warnings)
+    refresh_notice, refresh_target = _handle_meta_tags(soup, document.url, warnings)
     _rewrite_asset_and_page_urls(soup, document.url, warnings, asset_refs)
     _flatten_nested_tables(soup, warnings)
     _unwrap_disallowed_tags(
         soup, warnings, resolved_dialect.allowed_tags, resolved_dialect.name
     )
     _transliterate_to_ascii(soup, warnings)
+    _drop_refresh_over_content(
+        soup, refresh_notice, refresh_target, document.url, warnings
+    )
+    _add_empty_page_notice(soup, warnings)
 
     html = str(soup)
     return DowngradedDocument(html=html, asset_refs=asset_refs, warnings=warnings)

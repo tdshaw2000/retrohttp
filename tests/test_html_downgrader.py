@@ -89,14 +89,90 @@ def test_strips_frameset_and_frame_tags():
     assert any("frame" in w for w in result.warnings)
 
 
-def test_strips_noscript_blocks_entirely():
+def test_unwraps_noscript_keeping_its_fallback_content():
+    # Target clients never run JS, so <noscript> content is the origin's
+    # own rendering for exactly this reader.
     html = "<noscript><p>enable JS</p></noscript><p>real content</p>"
 
     result = downgrade_html(_document(html))
 
     assert "<noscript" not in result.html
-    assert "enable JS" not in result.html
+    assert "<p>enable JS</p>" in result.html
     assert "<p>real content</p>" in result.html
+
+
+def test_drops_non_refresh_meta_tags():
+    html = (
+        '<html><head><meta charset="utf-8"><meta name="viewport" '
+        'content="width=device-width"></head><body><p>hi</p></body></html>'
+    )
+
+    result = downgrade_html(_document(html))
+
+    assert "<meta" not in result.html
+
+
+def test_keeps_meta_refresh_inside_noscript_with_proxied_url():
+    html = (
+        '<html><head><noscript><meta http-equiv="refresh" '
+        'content="0; URL=/?_fb_noscript=1" /></noscript></head>'
+        "<body><div></div></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://www.facebook.com/home.php"))
+    soup = BeautifulSoup(result.html, "lxml")
+
+    proxied = "/proxy?url=https%3A%2F%2Fwww.facebook.com%2F%3F_fb_noscript%3D1"
+    meta = soup.find("meta")
+    assert meta["http-equiv"] == "Refresh"
+    assert meta["content"] == f"3; URL={proxied}"
+    # Visible fallback for clients that ignore refresh (Mosaic).
+    assert soup.body.find("a")["href"] == proxied
+
+
+@pytest.mark.parametrize(
+    "content",
+    ["5;url='/next'", "5, URL=/next", "5;URL=/next"],
+)
+def test_parses_meta_refresh_content_variants(content):
+    html = (
+        f'<html><head><meta http-equiv="Refresh" content="{content}"></head>'
+        "<body></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://example.com/a"))
+    meta = BeautifulSoup(result.html, "lxml").find("meta")
+
+    assert meta["content"] == "5; URL=/proxy?url=https%3A%2F%2Fexample.com%2Fnext"
+
+
+def test_meta_refresh_without_url_is_dropped():
+    html = '<html><head><meta http-equiv="refresh" content="30"></head><body><p>x</p></body></html>'
+
+    result = downgrade_html(_document(html))
+
+    assert "<meta" not in result.html
+
+
+def test_js_only_page_gets_explanatory_notice_instead_of_blank_body():
+    html = (
+        "<html><head><title>App</title><script>boot()</script></head><body>"
+        '<div id="root"></div><img src="/pixel.gif" width="1" height="1">'
+        "<script>render()</script></body></html>"
+    )
+
+    result = downgrade_html(_document(html))
+    body = BeautifulSoup(result.html, "lxml").body
+
+    assert "JavaScript" in body.get_text()
+    assert any("no visible content" in w for w in result.warnings)
+
+
+def test_no_empty_notice_when_page_has_visible_content():
+    result = downgrade_html(_document("<p>hello</p>"))
+
+    assert "JavaScript" not in result.html
+    assert not any("no visible content" in w for w in result.warnings)
 
 
 def test_strips_inline_style_attribute_but_keeps_tag():
@@ -628,3 +704,237 @@ def test_invalid_dialect_error_names_html4_option_too():
         downgrade_html(_document("<p>hi</p>"), dialect="bogus")
 
     assert "html4" in str(exc_info.value)
+
+
+def test_facebook_style_js_shell_is_not_served_blank():
+    # Approximates what www.facebook.com serves a non-browser User-Agent:
+    # an empty JS app shell whose only no-JS path is a <noscript> refresh.
+    from pathlib import Path
+
+    fixture = Path(__file__).parent.parent / "fixtures" / "html_downgrader" / "js_shell_app.html"
+    document = FetchedDocument(url="https://www.facebook.com/", html=fixture.read_bytes())
+
+    for dialect in ("html2", "html3.2", "html4"):
+        soup = BeautifulSoup(downgrade_html(document, dialect=dialect).html, "lxml")
+        assert soup.body.find("a") is not None
+        assert soup.body.get_text().strip()
+
+
+def test_hidden_inputs_do_not_count_as_visible_content():
+    html = (
+        "<body><div id=root></div><form method=post action=/x>"
+        '<input type="hidden" name="lsd" value="AVq"></form>'
+        "<script>x()</script></body>"
+    )
+
+    result = downgrade_html(_document(html))
+
+    assert "JavaScript" in BeautifulSoup(result.html, "lxml").body.get_text()
+
+
+def test_html4_frameset_page_gets_no_empty_page_notice():
+    html = '<html><frameset cols="50%,50%"><frame src="/a"><frame src="/b"></frameset></html>'
+
+    result = downgrade_html(_document(html), dialect="html4")
+
+    assert "<body" not in result.html
+    assert "JavaScript" not in result.html
+    assert not any("no visible content" in w for w in result.warnings)
+
+
+def test_meta_refresh_back_to_the_same_path_is_dropped_but_link_kept():
+    # The fetcher keeps no cookies, so a refresh to the same path can loop
+    # forever on a client that can't escape a 0-second refresh.
+    html = (
+        '<html><head><noscript><meta http-equiv="refresh" '
+        'content="0; URL=/?_fb_noscript=1" /></noscript></head>'
+        "<body></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://www.facebook.com/"))
+    soup = BeautifulSoup(result.html, "lxml")
+
+    assert soup.find("meta") is None
+    assert soup.body.find("a")["href"] == (
+        "/proxy?url=https%3A%2F%2Fwww.facebook.com%2F%3F_fb_noscript%3D1"
+    )
+
+
+def test_meta_refresh_delay_is_raised_to_a_small_minimum():
+    html = (
+        '<html><head><meta http-equiv="refresh" content="0; URL=/next"></head>'
+        "<body></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://example.com/a"))
+    meta = BeautifulSoup(result.html, "lxml").find("meta")
+
+    assert meta["content"].startswith("3; ")
+
+
+@pytest.mark.parametrize("content", ["garbage", "0", "0; "])
+def test_meta_refresh_without_a_real_url_is_dropped(content):
+    html = (
+        f'<html><head><meta http-equiv="refresh" content="{content}"></head>'
+        "<body><p>x</p></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://example.com/a"))
+
+    assert "<meta" not in result.html
+
+
+def test_html4_style_text_does_not_count_as_visible_content():
+    html = "<body><style>body{color:black}</style><div id=root></div><script>x()</script></body>"
+
+    result = downgrade_html(_document(html), dialect="html4")
+
+    assert any("no visible content" in w for w in result.warnings)
+
+
+@pytest.mark.parametrize("dialect", ["html2", "html3.2", "html4"])
+def test_refresh_fallback_link_is_kept_when_page_has_no_body(dialect):
+    html = (
+        '<html><head><noscript><meta http-equiv="refresh" '
+        'content="0; URL=/?nojs=1"></noscript></head></html>'
+    )
+
+    result = downgrade_html(_document(html, url="https://example.com/"), dialect=dialect)
+    link = BeautifulSoup(result.html, "lxml").body.find("a")
+
+    assert link["href"] == "/proxy?url=https%3A%2F%2Fexample.com%2F%3Fnojs%3D1"
+
+
+def test_refresh_is_not_automatic_when_page_already_has_content():
+    html = (
+        '<html><head><noscript><meta http-equiv="refresh" '
+        'content="0; URL=/unsupported"></noscript></head>'
+        "<body><p>The article text.</p></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://example.com/story"))
+    soup = BeautifulSoup(result.html, "lxml")
+
+    assert soup.find("meta") is None
+    assert soup.body.find("a") is not None
+    assert "The article text." in soup.body.get_text()
+
+
+def test_refresh_to_same_path_on_another_host_keeps_auto_refresh():
+    html = (
+        '<html><head><meta http-equiv="refresh" content="0; URL=https://other.com/">'
+        "</head><body></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://a.com/"))
+
+    assert BeautifulSoup(result.html, "lxml").find("meta") is not None
+
+
+@pytest.mark.parametrize("dialect", ["html2", "html3.2", "html4"])
+def test_comment_only_body_gets_empty_page_notice(dialect):
+    html = (
+        "<html><head><title>X</title></head><body><div id=root></div>"
+        "<!-- This HTML file is a template. --></body></html>"
+    )
+
+    result = downgrade_html(_document(html), dialect=dialect)
+
+    assert any("no visible content" in w for w in result.warnings)
+
+
+def test_comment_does_not_stop_auto_refresh():
+    html = (
+        "<html><head><noscript><meta http-equiv=refresh content='0;url=/nojs'>"
+        "</noscript></head><body><!-- x --><div></div></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://example.com/app"))
+
+    assert BeautifulSoup(result.html, "lxml").find("meta") is not None
+
+
+@pytest.mark.parametrize("dialect", ["html2", "html3.2", "html4"])
+def test_noscript_fallback_in_head_moves_into_body(dialect):
+    html = (
+        '<html><head><title>T</title><noscript><div class="nojs"><p>You need '
+        'JavaScript. <a href="https://example.com/lite">Use the lite site</a></p>'
+        "</div></noscript></head><body><div id=root></div></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://example.com/"), dialect=dialect)
+    soup = BeautifulSoup(result.html, "lxml")
+
+    assert soup.head.find("p") is None
+    assert "Use the lite site" in soup.body.get_text()
+    assert not any("no visible content" in w for w in result.warnings)
+
+
+def test_kept_refresh_meta_is_placed_in_head():
+    html = (
+        "<html><head></head><body><noscript><meta http-equiv=refresh "
+        "content='0;url=/nojs'></noscript><div></div></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://example.com/app"))
+    soup = BeautifulSoup(result.html, "lxml")
+
+    assert soup.head.find("meta") is not None
+    assert soup.body.find("meta") is None
+
+
+def test_self_reload_refresh_adds_no_link_over_content():
+    html = (
+        '<html><head><meta http-equiv="refresh" content="300; url=https://example.com/news">'
+        "</head><body><p>Headline</p></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://example.com/news"))
+
+    assert "redirects to" not in result.html
+    assert "Headline" in result.html
+
+
+def test_huge_refresh_delay_does_not_crash():
+    delay = "9" * 5000
+    html = (
+        f'<html><head><meta http-equiv="refresh" content="{delay}; URL=/next"></head>'
+        "<body></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://example.com/a"))
+
+    assert BeautifulSoup(result.html, "lxml").find("meta") is not None
+
+
+def test_refresh_content_parsing_is_fast_on_hostile_whitespace():
+    import time
+
+    content = "0;" + " " * 5000 + "x&#39;y"
+    html = f'<html><head><meta http-equiv="refresh" content="{content}"></head><body></body></html>'
+
+    started = time.monotonic()
+    downgrade_html(_document(html, url="https://example.com/a"))
+
+    assert time.monotonic() - started < 1.0
+
+
+def test_refresh_url_may_contain_an_apostrophe():
+    html = (
+        "<html><head><meta http-equiv=\"refresh\" content=\"0; url=/a'b\"></head>"
+        "<body></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://example.com/x"))
+    meta = BeautifulSoup(result.html, "lxml").find("meta")
+
+    assert meta["content"] == "3; URL=/proxy?url=https%3A%2F%2Fexample.com%2Fa%27b"
+
+
+@pytest.mark.parametrize("content", ["\u00b2; URL=/next", "\u0661; URL=/next"])
+def test_non_ascii_digit_delay_does_not_crash(content):
+    html = f'<html><head><meta http-equiv="refresh" content="{content}"></head><body></body></html>'
+
+    result = downgrade_html(_document(html, url="https://example.com/a"))
+
+    assert "<meta" not in result.html
