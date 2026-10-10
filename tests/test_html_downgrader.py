@@ -829,3 +829,26 @@ def test_refresh_to_same_path_on_another_host_keeps_auto_refresh():
     result = downgrade_html(_document(html, url="https://a.com/"))
 
     assert BeautifulSoup(result.html, "lxml").find("meta") is not None
+
+
+@pytest.mark.parametrize("dialect", ["html2", "html3.2", "html4"])
+def test_comment_only_body_gets_empty_page_notice(dialect):
+    html = (
+        "<html><head><title>X</title></head><body><div id=root></div>"
+        "<!-- This HTML file is a template. --></body></html>"
+    )
+
+    result = downgrade_html(_document(html), dialect=dialect)
+
+    assert any("no visible content" in w for w in result.warnings)
+
+
+def test_comment_does_not_stop_auto_refresh():
+    html = (
+        "<html><head><noscript><meta http-equiv=refresh content='0;url=/nojs'>"
+        "</noscript></head><body><!-- x --><div></div></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://example.com/app"))
+
+    assert BeautifulSoup(result.html, "lxml").find("meta") is not None
