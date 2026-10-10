@@ -852,3 +852,44 @@ def test_comment_does_not_stop_auto_refresh():
     result = downgrade_html(_document(html, url="https://example.com/app"))
 
     assert BeautifulSoup(result.html, "lxml").find("meta") is not None
+
+
+@pytest.mark.parametrize("dialect", ["html2", "html3.2", "html4"])
+def test_noscript_fallback_in_head_moves_into_body(dialect):
+    html = (
+        '<html><head><title>T</title><noscript><div class="nojs"><p>You need '
+        'JavaScript. <a href="https://example.com/lite">Use the lite site</a></p>'
+        "</div></noscript></head><body><div id=root></div></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://example.com/"), dialect=dialect)
+    soup = BeautifulSoup(result.html, "lxml")
+
+    assert soup.head.find("p") is None
+    assert "Use the lite site" in soup.body.get_text()
+    assert not any("no visible content" in w for w in result.warnings)
+
+
+def test_kept_refresh_meta_is_placed_in_head():
+    html = (
+        "<html><head></head><body><noscript><meta http-equiv=refresh "
+        "content='0;url=/nojs'></noscript><div></div></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://example.com/app"))
+    soup = BeautifulSoup(result.html, "lxml")
+
+    assert soup.head.find("meta") is not None
+    assert soup.body.find("meta") is None
+
+
+def test_self_reload_refresh_adds_no_link_over_content():
+    html = (
+        '<html><head><meta http-equiv="refresh" content="300; url=https://example.com/news">'
+        "</head><body><p>Headline</p></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://example.com/news"))
+
+    assert "redirects to" not in result.html
+    assert "Headline" in result.html
