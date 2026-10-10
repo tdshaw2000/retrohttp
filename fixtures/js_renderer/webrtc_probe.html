@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head><title>WebRTC probe</title></head>
+<body>
+<div id="root"></div>
+<script>
+  // A hostile page using a TURN-over-TCP server to reach the local network.
+  // __TURN__ is replaced by the test with a listener on a loopback address.
+  document.getElementById("root").innerHTML = "<p>Rendered by script</p>";
+  try {
+    var pc = new RTCPeerConnection({
+      iceServers: [{ urls: "__TURN__", username: "u", credential: "c" }]
+    });
+    pc.createDataChannel("x");
+    pc.createOffer().then(function (offer) { return pc.setLocalDescription(offer); });
+  } catch (e) {}
+</script>
+</body>
+</html>

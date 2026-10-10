@@ -1,4 +1,6 @@
-from server.main import build_parser, format_startup_message
+import pytest
+
+from server.main import build_parser, configure_js_rendering, format_startup_message
 
 
 def test_format_startup_message_includes_html_version_for_docroot():
@@ -36,3 +38,31 @@ def test_javascript_rendering_is_on_by_default():
 
 def test_javascript_rendering_can_be_switched_off():
     assert build_parser().parse_args(["--no-render-js"]).render_js is False
+
+
+def test_rendering_uses_the_sandbox_when_it_can():
+    renderer, status = configure_js_rendering(True, probe=lambda: "sandboxed")
+
+    assert renderer is not None and renderer.sandbox is True
+    assert status == "on"
+
+
+def test_rendering_without_the_sandbox_says_so():
+    renderer, status = configure_js_rendering(True, probe=lambda: "unsandboxed")
+
+    assert renderer is not None and renderer.sandbox is False
+    assert "sandbox" in status
+
+
+def test_rendering_without_an_engine_says_so():
+    renderer, status = configure_js_rendering(True, probe=lambda: None)
+
+    assert renderer is None
+    assert status == "on, but the engine is not installed"
+
+
+def test_rendering_off_never_probes_the_engine():
+    renderer, status = configure_js_rendering(False, probe=lambda: pytest.fail("probed"))
+
+    assert renderer is None
+    assert status == "off"
