@@ -420,7 +420,7 @@ def _handle_meta_tags(soup: BeautifulSoup, base_url: str, warnings: list):
         if (target_parts.netloc, target_parts.path) == (page_parts.netloc, page_parts.path):
             tag.decompose()
             continue
-        delay_match = re.match(r"\s*(\d+)", tag["content"])
+        delay_match = re.match(r"\s*(\d{1,6})", tag["content"])  # int() rejects huge strings
         delay = max(int(delay_match.group(1)), MIN_REFRESH_DELAY_SECONDS)
         rewritten = _proxy_rewrite(base_url, resolved, "/proxy")
         tag.attrs = {"http-equiv": "Refresh", "content": f"{delay}; URL={rewritten}"}
