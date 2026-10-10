@@ -137,7 +137,7 @@ def test_keeps_meta_refresh_inside_noscript_with_proxied_url():
 def test_parses_meta_refresh_content_variants(content):
     html = (
         f'<html><head><meta http-equiv="Refresh" content="{content}"></head>'
-        "<body><p>x</p></body></html>"
+        "<body></body></html>"
     )
 
     result = downgrade_html(_document(html, url="https://example.com/a"))
@@ -763,7 +763,7 @@ def test_meta_refresh_back_to_the_same_path_is_dropped_but_link_kept():
 def test_meta_refresh_delay_is_raised_to_a_small_minimum():
     html = (
         '<html><head><meta http-equiv="refresh" content="0; URL=/next"></head>'
-        "<body><p>x</p></body></html>"
+        "<body></body></html>"
     )
 
     result = downgrade_html(_document(html, url="https://example.com/a"))
@@ -782,3 +782,50 @@ def test_meta_refresh_without_a_real_url_is_dropped(content):
     result = downgrade_html(_document(html, url="https://example.com/a"))
 
     assert "<meta" not in result.html
+
+
+def test_html4_style_text_does_not_count_as_visible_content():
+    html = "<body><style>body{color:black}</style><div id=root></div><script>x()</script></body>"
+
+    result = downgrade_html(_document(html), dialect="html4")
+
+    assert any("no visible content" in w for w in result.warnings)
+
+
+@pytest.mark.parametrize("dialect", ["html2", "html3.2", "html4"])
+def test_refresh_fallback_link_is_kept_when_page_has_no_body(dialect):
+    html = (
+        '<html><head><noscript><meta http-equiv="refresh" '
+        'content="0; URL=/?nojs=1"></noscript></head></html>'
+    )
+
+    result = downgrade_html(_document(html, url="https://example.com/"), dialect=dialect)
+    link = BeautifulSoup(result.html, "lxml").body.find("a")
+
+    assert link["href"] == "/proxy?url=https%3A%2F%2Fexample.com%2F%3Fnojs%3D1"
+
+
+def test_refresh_is_not_automatic_when_page_already_has_content():
+    html = (
+        '<html><head><noscript><meta http-equiv="refresh" '
+        'content="0; URL=/unsupported"></noscript></head>'
+        "<body><p>The article text.</p></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://example.com/story"))
+    soup = BeautifulSoup(result.html, "lxml")
+
+    assert soup.find("meta") is None
+    assert soup.body.find("a") is not None
+    assert "The article text." in soup.body.get_text()
+
+
+def test_refresh_to_same_path_on_another_host_keeps_auto_refresh():
+    html = (
+        '<html><head><meta http-equiv="refresh" content="0; URL=https://other.com/">'
+        "</head><body></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://a.com/"))
+
+    assert BeautifulSoup(result.html, "lxml").find("meta") is not None
