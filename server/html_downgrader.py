@@ -452,7 +452,12 @@ def _handle_meta_tags(
             tag.decompose()
             continue
         # Left unproxied: _rewrite_asset_and_page_urls proxies <a href>.
-        refresh_links.append(resolved)
+        # Author refreshes go first: a <noscript> one may be dropped later
+        # (_drop_refresh_over_content), and the link must match what stays.
+        if from_noscript:
+            refresh_links.append(resolved)
+        else:
+            refresh_links.insert(0, resolved)
         # The fetcher keeps no cookies, so a refresh back to the same
         # path (Facebook's /?_fb_noscript=1 from /) can serve the same
         # shell again and loop forever; keep only the visible link then.
@@ -523,7 +528,8 @@ def _is_tracking_pixel(tag) -> bool:
         value = (tag.get(attr) or "").strip().lower()
         return value[:-2].strip() if value.endswith("px") else value
 
-    return size("width") in _INVISIBLE_IMAGE_SIZES or size("height") in _INVISIBLE_IMAGE_SIZES
+    # Both dimensions: a 1px-tall rule or 1px-wide spacer is layout, not a beacon.
+    return size("width") in _INVISIBLE_IMAGE_SIZES and size("height") in _INVISIBLE_IMAGE_SIZES
 
 
 def _drop_tracking_pixels(soup: BeautifulSoup, warnings: list) -> None:
