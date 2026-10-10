@@ -337,9 +337,14 @@ def _proxy_rewrite(base_url: str, target: str, route: str) -> str | None:
 
 
 _META_REFRESH_URL_PATTERN = re.compile(
-    r"""^\s*[\d.]*\s*[;,]?\s*(?:url\s*=\s*)?["']?([^"']*)["']?\s*$""",
+    r"""^\s*\d[\d.]*\s*[;,]\s*(?:url\s*=\s*)?["']?([^"']*)["']?\s*$""",
     re.IGNORECASE,
 )
+
+
+# A 0-second refresh is hard to escape on a vintage client; a few seconds
+# lets the reader see the page and stop it.
+MIN_REFRESH_DELAY_SECONDS = 3
 
 
 def _meta_refresh_target(content: str | None) -> str | None:
@@ -369,12 +374,18 @@ def _handle_meta_tags(soup: BeautifulSoup, base_url: str, warnings: list) -> Non
         if not resolved:
             tag.decompose()
             continue
-        delay_match = re.match(r"\s*(\d+)", tag["content"])
-        delay = delay_match.group(1) if delay_match else "0"
-        rewritten = _proxy_rewrite(base_url, resolved, "/proxy")
-        tag.attrs = {"http-equiv": "Refresh", "content": f"{delay}; URL={rewritten}"}
         # Left unproxied: _rewrite_asset_and_page_urls proxies <a href>.
         refresh_links.append(resolved)
+        # The fetcher keeps no cookies, so a refresh back to the same
+        # path (Facebook's /?_fb_noscript=1 from /) can serve the same
+        # shell again and loop forever; keep only the visible link then.
+        if urlparse(resolved).path == urlparse(base_url).path:
+            tag.decompose()
+            continue
+        delay_match = re.match(r"\s*(\d+)", tag["content"])
+        delay = max(int(delay_match.group(1)), MIN_REFRESH_DELAY_SECONDS)
+        rewritten = _proxy_rewrite(base_url, resolved, "/proxy")
+        tag.attrs = {"http-equiv": "Refresh", "content": f"{delay}; URL={rewritten}"}
 
     if refresh_links and soup.body is not None:
         notice = soup.new_tag("p")
@@ -395,6 +406,8 @@ def _has_visible_content(body) -> bool:
     if body.get_text().strip():
         return True
     for tag in body.find_all(["img", "input", "select", "textarea"]):
+        if tag.name == "input" and (tag.get("type") or "").lower() == "hidden":
+            continue
         if tag.name == "img" and (
             tag.get("width") in _INVISIBLE_IMAGE_SIZES
             or tag.get("height") in _INVISIBLE_IMAGE_SIZES
@@ -412,6 +425,8 @@ EMPTY_PAGE_NOTICE = (
 
 def _add_empty_page_notice(soup: BeautifulSoup, warnings: list) -> None:
     """Say so when nothing visible survived, instead of serving a blank page."""
+    if soup.find("frameset") is not None:
+        return  # html4 frame passthrough: content lives in the frames, no <body>
     body = soup.body
     if body is None:
         body = soup.new_tag("body")
