@@ -89,14 +89,90 @@ def test_strips_frameset_and_frame_tags():
     assert any("frame" in w for w in result.warnings)
 
 
-def test_strips_noscript_blocks_entirely():
+def test_unwraps_noscript_keeping_its_fallback_content():
+    # Target clients never run JS, so <noscript> content is the origin's
+    # own rendering for exactly this reader.
     html = "<noscript><p>enable JS</p></noscript><p>real content</p>"
 
     result = downgrade_html(_document(html))
 
     assert "<noscript" not in result.html
-    assert "enable JS" not in result.html
+    assert "<p>enable JS</p>" in result.html
     assert "<p>real content</p>" in result.html
+
+
+def test_drops_non_refresh_meta_tags():
+    html = (
+        '<html><head><meta charset="utf-8"><meta name="viewport" '
+        'content="width=device-width"></head><body><p>hi</p></body></html>'
+    )
+
+    result = downgrade_html(_document(html))
+
+    assert "<meta" not in result.html
+
+
+def test_keeps_meta_refresh_inside_noscript_with_proxied_url():
+    html = (
+        '<html><head><noscript><meta http-equiv="refresh" '
+        'content="0; URL=/?_fb_noscript=1" /></noscript></head>'
+        "<body><div></div></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://www.facebook.com/"))
+    soup = BeautifulSoup(result.html, "lxml")
+
+    proxied = "/proxy?url=https%3A%2F%2Fwww.facebook.com%2F%3F_fb_noscript%3D1"
+    meta = soup.find("meta")
+    assert meta["http-equiv"] == "Refresh"
+    assert meta["content"] == f"0; URL={proxied}"
+    # Visible fallback for clients that ignore refresh (Mosaic).
+    assert soup.body.find("a")["href"] == proxied
+
+
+@pytest.mark.parametrize(
+    "content",
+    ["5;url='/next'", "5, URL=/next", "5;URL=/next"],
+)
+def test_parses_meta_refresh_content_variants(content):
+    html = (
+        f'<html><head><meta http-equiv="Refresh" content="{content}"></head>'
+        "<body><p>x</p></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://example.com/a"))
+    meta = BeautifulSoup(result.html, "lxml").find("meta")
+
+    assert meta["content"] == "5; URL=/proxy?url=https%3A%2F%2Fexample.com%2Fnext"
+
+
+def test_meta_refresh_without_url_is_dropped():
+    html = '<html><head><meta http-equiv="refresh" content="30"></head><body><p>x</p></body></html>'
+
+    result = downgrade_html(_document(html))
+
+    assert "<meta" not in result.html
+
+
+def test_js_only_page_gets_explanatory_notice_instead_of_blank_body():
+    html = (
+        "<html><head><title>App</title><script>boot()</script></head><body>"
+        '<div id="root"></div><img src="/pixel.gif" width="1" height="1">'
+        "<script>render()</script></body></html>"
+    )
+
+    result = downgrade_html(_document(html))
+    body = BeautifulSoup(result.html, "lxml").body
+
+    assert "JavaScript" in body.get_text()
+    assert any("no visible content" in w for w in result.warnings)
+
+
+def test_no_empty_notice_when_page_has_visible_content():
+    result = downgrade_html(_document("<p>hello</p>"))
+
+    assert "JavaScript" not in result.html
+    assert not any("no visible content" in w for w in result.warnings)
 
 
 def test_strips_inline_style_attribute_but_keeps_tag():
@@ -628,3 +704,17 @@ def test_invalid_dialect_error_names_html4_option_too():
         downgrade_html(_document("<p>hi</p>"), dialect="bogus")
 
     assert "html4" in str(exc_info.value)
+
+
+def test_facebook_style_js_shell_is_not_served_blank():
+    # Approximates what www.facebook.com serves a non-browser User-Agent:
+    # an empty JS app shell whose only no-JS path is a <noscript> refresh.
+    from pathlib import Path
+
+    fixture = Path(__file__).parent.parent / "fixtures" / "html_downgrader" / "js_shell_app.html"
+    document = FetchedDocument(url="https://www.facebook.com/", html=fixture.read_bytes())
+
+    for dialect in ("html2", "html3.2", "html4"):
+        soup = BeautifulSoup(downgrade_html(document, dialect=dialect).html, "lxml")
+        assert soup.find("meta", attrs={"http-equiv": "Refresh"}) is not None
+        assert soup.body.get_text().strip()

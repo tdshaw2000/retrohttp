@@ -57,6 +57,10 @@ ALLOWED_TAGS = {
     "th",
     "form",
     "input",
+    # Only <meta http-equiv="refresh"> survives (see _handle_meta_tags);
+    # RFC 1866 HTML 2.0 defines META/HTTP-EQUIV, and Netscape 1.1's
+    # "client pull" honors refresh.
+    "meta",
     "select",
     "option",
     "textarea",
@@ -80,10 +84,12 @@ _VOID_TAG_PATTERN = re.compile(
 )
 
 
+# <noscript> is deliberately absent: no target client runs JS, so its
+# content is exactly the fallback the origin meant for this reader - it
+# is unwrapped like any other wrapper (see _unwrap_disallowed_tags).
 BLOCK_STRIP_TAGS = {
     "script",
     "style",
-    "noscript",
     "frame",
     "frameset",
     "canvas",
@@ -328,6 +334,94 @@ def _proxy_rewrite(base_url: str, target: str, route: str) -> str | None:
         return None
 
     return f"{route}?url={quote(resolved, safe='')}"
+
+
+_META_REFRESH_URL_PATTERN = re.compile(
+    r"""^\s*[\d.]*\s*[;,]?\s*(?:url\s*=\s*)?["']?([^"']*)["']?\s*$""",
+    re.IGNORECASE,
+)
+
+
+def _meta_refresh_target(content: str | None) -> str | None:
+    if not content:
+        return None
+    match = _META_REFRESH_URL_PATTERN.match(content)
+    if not match or not match.group(1).strip():
+        return None
+    return match.group(1).strip()
+
+
+def _handle_meta_tags(soup: BeautifulSoup, base_url: str, warnings: list) -> None:
+    """Keep only <meta http-equiv="refresh">, rewritten through the proxy.
+
+    Everything else (<meta charset>, viewport, og:*, ...) is dropped -
+    SPEC.md rules out <meta charset> and the rest mean nothing to target
+    clients. A refresh is how JS-heavy sites (Facebook, for one) send a
+    no-JS browser to their fallback page from inside <noscript>, so it is
+    kept with its URL proxied, and a plain link to the same target is put
+    at the top of <body> for clients that don't honor refresh (Mosaic).
+    """
+    refresh_links = []
+    for tag in soup.find_all("meta"):
+        http_equiv = (tag.get("http-equiv") or "").strip().lower()
+        target = _meta_refresh_target(tag.get("content")) if http_equiv == "refresh" else None
+        resolved = _resolve_proxyable_target(base_url, target) if target else None
+        if not resolved:
+            tag.decompose()
+            continue
+        delay_match = re.match(r"\s*(\d+)", tag["content"])
+        delay = delay_match.group(1) if delay_match else "0"
+        rewritten = _proxy_rewrite(base_url, resolved, "/proxy")
+        tag.attrs = {"http-equiv": "Refresh", "content": f"{delay}; URL={rewritten}"}
+        # Left unproxied: _rewrite_asset_and_page_urls proxies <a href>.
+        refresh_links.append(resolved)
+
+    if refresh_links and soup.body is not None:
+        notice = soup.new_tag("p")
+        notice.append(NavigableString("This page redirects to "))
+        link = soup.new_tag("a", href=refresh_links[0])
+        link.append(NavigableString("the next page"))
+        notice.append(link)
+        notice.append(NavigableString("."))
+        soup.body.insert(0, notice)
+        warnings.append("kept <meta> refresh with proxied URL and added a visible link to it")
+
+
+# Images this small are tracking/beacon pixels, not visible content.
+_INVISIBLE_IMAGE_SIZES = {"0", "1"}
+
+
+def _has_visible_content(body) -> bool:
+    if body.get_text().strip():
+        return True
+    for tag in body.find_all(["img", "input", "select", "textarea"]):
+        if tag.name == "img" and (
+            tag.get("width") in _INVISIBLE_IMAGE_SIZES
+            or tag.get("height") in _INVISIBLE_IMAGE_SIZES
+        ):
+            continue
+        return True
+    return False
+
+
+EMPTY_PAGE_NOTICE = (
+    "This page has no content this browser can display. The site most "
+    "likely builds its pages with JavaScript, which the proxy does not run."
+)
+
+
+def _add_empty_page_notice(soup: BeautifulSoup, warnings: list) -> None:
+    """Say so when nothing visible survived, instead of serving a blank page."""
+    body = soup.body
+    if body is None:
+        body = soup.new_tag("body")
+        (soup.html or soup).append(body)
+    if _has_visible_content(body):
+        return
+    notice = soup.new_tag("p")
+    notice.append(NavigableString(EMPTY_PAGE_NOTICE))
+    body.insert(0, notice)
+    warnings.append("no visible content survived downgrading; added an explanatory notice")
 
 
 def _strip_javascript_hrefs(soup: BeautifulSoup, warnings: list) -> None:
@@ -611,12 +705,14 @@ def downgrade_html(
         soup, warnings, resolved_dialect.allowed_tags, resolved_dialect.allows_css
     )
     _strip_javascript_hrefs(soup, warnings)
+    _handle_meta_tags(soup, document.url, warnings)
     _rewrite_asset_and_page_urls(soup, document.url, warnings, asset_refs)
     _flatten_nested_tables(soup, warnings)
     _unwrap_disallowed_tags(
         soup, warnings, resolved_dialect.allowed_tags, resolved_dialect.name
     )
     _transliterate_to_ascii(soup, warnings)
+    _add_empty_page_notice(soup, warnings)
 
     html = str(soup)
     return DowngradedDocument(html=html, asset_refs=asset_refs, warnings=warnings)
