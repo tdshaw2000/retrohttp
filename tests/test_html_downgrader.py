@@ -893,3 +893,15 @@ def test_self_reload_refresh_adds_no_link_over_content():
 
     assert "redirects to" not in result.html
     assert "Headline" in result.html
+
+
+def test_huge_refresh_delay_does_not_crash():
+    delay = "9" * 5000
+    html = (
+        f'<html><head><meta http-equiv="refresh" content="{delay}; URL=/next"></head>'
+        "<body></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://example.com/a"))
+
+    assert BeautifulSoup(result.html, "lxml").find("meta") is not None
