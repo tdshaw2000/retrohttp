@@ -579,20 +579,24 @@ def _has_visible_content(body, ignore=None) -> bool:
 
 EMPTY_PAGE_NOTICE = (
     "This page has no content this browser can display. It may be built "
-    "with JavaScript (which the proxy does not run), use frames, or be "
+    "with JavaScript the proxy could not run, use frames, or be "
     "written in characters this browser cannot show."
 )
 
 
-def _add_empty_page_notice(soup: BeautifulSoup, warnings: list) -> None:
-    """Say so when nothing visible survived, instead of serving a blank page."""
+def _add_empty_page_notice(soup: BeautifulSoup, warnings: list) -> bool:
+    """Say so when nothing visible survived, instead of serving a blank page.
+
+    Returns whether the page has content of its own.
+    """
     body = _ensure_body(soup)
     if body is None or _has_visible_content(body):
-        return
+        return True
     notice = soup.new_tag("p")
     notice.append(NavigableString(EMPTY_PAGE_NOTICE))
     body.insert(0, notice)
     warnings.append("no visible content survived downgrading; added an explanatory notice")
+    return False
 
 
 def _strip_javascript_hrefs(soup: BeautifulSoup, warnings: list) -> None:
@@ -894,7 +898,9 @@ def downgrade_html(
     _drop_refresh_over_content(
         soup, refresh_notice, refresh_target, noscript_refreshes, document.url, warnings
     )
-    _add_empty_page_notice(soup, warnings)
+    has_content = _add_empty_page_notice(soup, warnings)
 
     html = str(soup)
-    return DowngradedDocument(html=html, asset_refs=asset_refs, warnings=warnings)
+    return DowngradedDocument(
+        html=html, asset_refs=asset_refs, warnings=warnings, has_content=has_content
+    )

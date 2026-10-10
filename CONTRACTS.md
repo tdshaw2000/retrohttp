@@ -69,6 +69,8 @@ DowngradedDocument {
                          // (e.g. "stripped <script> block at offset 4021",
                          // "flattened nested table to single level",
                          // "dropped unsupported CSS property 'grid-template-columns'")
+  has_content: bool     // false when nothing visible survived and the
+                         // empty-page notice was added instead
 }
 ```
 

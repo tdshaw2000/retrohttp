@@ -55,8 +55,13 @@ class AssetCache:
 
 
 def handle_proxy_request(
-    target: str, asset_cache: AssetCache, dialect: str = "html2"
+    target: str, asset_cache: AssetCache, dialect: str = "html2", renderer=None
 ) -> ProxyResult:
+    """Serve one proxied URL.
+
+    `renderer` (a js_renderer.JsRenderer, or None when the setting is
+    off) is only used for pages that came out empty.
+    """
     parsed = urlparse(target)
     real_url = parse_qs(parsed.query).get("url", [None])[0]
 
@@ -64,12 +69,12 @@ def handle_proxy_request(
         return _handle_asset(real_url, asset_cache)
 
     if parsed.path == PROXY_PAGE_ROUTE and real_url:
-        return _handle_page(real_url, dialect)
+        return _handle_page(real_url, dialect, renderer)
 
-    return _handle_page(target, dialect)
+    return _handle_page(target, dialect, renderer)
 
 
-def _handle_page(url: str, dialect: str) -> ProxyResult:
+def _handle_page(url: str, dialect: str, renderer=None) -> ProxyResult:
     try:
         document = fetch_document(url)
     except FetchError:
@@ -80,10 +85,21 @@ def _handle_page(url: str, dialect: str) -> ProxyResult:
         # a real HTTP status with a zero-byte body is exactly what makes
         # a vintage browser report "this document contains no data".
         downgraded = downgrade_html(document, dialect=dialect)
+        if document.status == 200 and not downgraded.has_content and renderer is not None:
+            downgraded = _downgrade_rendered(document.url, dialect, renderer, downgraded)
         body = downgraded.html.encode("latin-1", errors="replace")
         return ProxyResult(document.status, "text/html", body)
 
     return ProxyResult(STATUS_UPSTREAM_UNREACHABLE, "text/plain", b"Upstream error")
+
+
+def _downgrade_rendered(url: str, dialect: str, renderer, fallback):
+    """Downgrade the page as a browser shows it, if that has any content."""
+    rendered = renderer.render(url)
+    if rendered is None:
+        return fallback
+    downgraded = downgrade_html(rendered, dialect=dialect)
+    return downgraded if downgraded.has_content else fallback
 
 
 def _handle_asset(url: str, asset_cache: AssetCache) -> ProxyResult:

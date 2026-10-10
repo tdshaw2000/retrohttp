@@ -23,6 +23,8 @@ class DowngradedDocument:
     html: str
     asset_refs: list
     warnings: list
+    # False when nothing visible survived (the page got the empty-page notice).
+    has_content: bool = True
 
 
 @dataclass
