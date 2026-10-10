@@ -6,7 +6,7 @@ from pathlib import Path
 
 from server.connection import handle_connection
 from server.html_downgrader import DIALECTS
-from server.js_renderer import JsRenderer, engine_available
+from server.js_renderer import JsRenderer, engine_mode
 from server.proxy import AssetCache
 
 
@@ -55,9 +55,13 @@ def main() -> None:
     js_renderer = None
     js_rendering = "off"
     if args.render_js:
-        if engine_available():
-            js_renderer = JsRenderer()
+        mode = engine_mode()
+        if mode == "sandboxed":
+            js_renderer = JsRenderer(sandbox=True)
             js_rendering = "on"
+        elif mode == "unsandboxed":
+            js_renderer = JsRenderer(sandbox=False)
+            js_rendering = "on (this system can't run the browser's sandbox)"
         else:
             js_rendering = "on, but the engine is not installed"
 

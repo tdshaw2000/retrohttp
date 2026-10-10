@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 import pytest
 
 from server import js_renderer
-from server.js_renderer import JsRenderer, destination_allowed, engine_available
+from server.js_renderer import JsRenderer, destination_allowed, engine_available, engine_mode
 from server.proxy import AssetCache, handle_proxy_request
 from tests.test_proxy import run_server
 
@@ -27,9 +27,18 @@ def _fixture_routes() -> dict:
     }
 
 
+_engine_mode = []
+
+
+def _sandbox() -> bool:
+    if not _engine_mode:
+        _engine_mode.append(engine_mode())
+    return _engine_mode[0] == "sandboxed"
+
+
 def _renderer_for(base: str, **kwargs) -> JsRenderer:
     # The fixture server is on loopback, which renders are otherwise refused.
-    return JsRenderer(allowed_hosts={urlparse(base).netloc}, **kwargs)
+    return JsRenderer(allowed_hosts={urlparse(base).netloc}, sandbox=_sandbox(), **kwargs)
 
 
 @pytest.fixture
@@ -149,7 +158,7 @@ def test_a_page_that_never_finishes_is_abandoned_and_frees_its_slot():
 @needs_engine
 def test_local_pages_are_not_rendered_unless_allowed():
     with run_server(_fixture_routes()) as base:
-        assert JsRenderer().render(f"{base}/docs") is None
+        assert JsRenderer(sandbox=_sandbox()).render(f"{base}/docs") is None
 
 
 class _RecordingHandler(BaseHTTPRequestHandler):
@@ -196,6 +205,19 @@ def test_page_scripts_cannot_reach_the_local_network():
 
 
 @needs_engine
+def test_a_redirect_cannot_lead_the_engine_onto_the_local_network():
+    with _local_service() as (service, target):
+        routes = {
+            "/hop": {"status": 302, "headers": {"Location": f"{target}/admin"}},
+        }
+        with run_server(routes) as base:
+            rendered = _renderer_for(base).render(f"{base}/hop")
+
+    assert rendered is None or b"SECRET-CONFIG" not in rendered.html
+    assert service.requests == []
+
+
+@needs_engine
 def test_engine_identifies_itself_as_retrohttp():
     with _local_service() as (_service, target):
         probe = (FIXTURES / "local_network_probe.html").read_bytes()
@@ -204,3 +226,17 @@ def test_engine_identifies_itself_as_retrohttp():
             rendered = _renderer_for(base).render(f"{base}/probe")
 
     assert b"retrohttp/" in rendered.html
+
+
+@needs_engine
+def test_redirects_inside_allowed_hosts_still_work_and_report_where_they_ended():
+    routes = {
+        "/old": {"status": 301, "headers": {"Location": "/docs"}},
+        "/docs": _html_route((FIXTURES / "js_only_page.html").read_bytes()),
+    }
+    with run_server(routes) as base:
+        rendered = _renderer_for(base).render(f"{base}/old")
+
+    assert rendered is not None
+    assert rendered.url == f"{base}/docs"
+    assert b"Rendered by script" in rendered.html

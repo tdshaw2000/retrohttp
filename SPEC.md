@@ -214,6 +214,14 @@ downgrades that instead. Normal pages never start the engine.
   notice. One-time install: `python -m playwright install --with-deps
   chromium` in the server's virtualenv.
 - Only http/https URLs are rendered, at most two at a time.
+- It runs a stranger's JavaScript on the proxy's machine, so each
+  render is its own process, killed with its browser after a hard
+  deadline; every request the page makes (redirect hops, workers and
+  WebSockets included) is refused unless its host resolves only to
+  public addresses, so pages can't reach the LAN, loopback services or
+  cloud metadata; and Chromium's sandbox is used where the system
+  supports it (the startup line says when it can't). The engine sends
+  Chromium's User-Agent with the retrohttp token appended.
 
 ## Non-goals (v1)
 

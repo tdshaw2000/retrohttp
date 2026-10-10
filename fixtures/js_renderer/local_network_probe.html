@@ -12,6 +12,10 @@
       document.getElementById("root").innerHTML += "<p>Leaked " + t + "</p>";
     }).catch(function () {});
     var img = new Image(); img.src = "__TARGET__/pixel.gif";
+    var ws = new WebSocket("__TARGET__/socket".replace("http", "ws"));
+    var worker = new Worker(URL.createObjectURL(new Blob(
+      ['fetch("__TARGET__/worker", { method: "POST", mode: "no-cors", body: "x" })'],
+      { type: "text/javascript" })));
   });
 </script>
 </head>
