@@ -1044,3 +1044,43 @@ def test_one_pixel_rule_and_spacer_images_are_kept(size):
     result = downgrade_html(_document(html))
 
     assert "<img" in result.html
+
+
+def test_link_follows_kept_noscript_refresh_when_author_one_reloads_same_page():
+    html = (
+        "<html><head><meta http-equiv=refresh content='300; url=/old'>"
+        "<noscript><meta http-equiv=refresh content='0; url=/enable-js'></noscript>"
+        "</head><body></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://example.com/old"))
+    soup = BeautifulSoup(result.html, "lxml")
+
+    proxied = "/proxy?url=https%3A%2F%2Fexample.com%2Fenable-js"
+    assert soup.find("meta")["content"] == f"3; URL={proxied}"
+    assert soup.body.find("a")["href"] == proxied
+
+
+def test_link_follows_the_first_author_refresh_in_page_order():
+    html = (
+        "<html><head><meta http-equiv=refresh content='5; url=/a'>"
+        "<meta http-equiv=refresh content='5; url=/b'></head><body></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://example.com/x"))
+    link = BeautifulSoup(result.html, "lxml").body.find("a")
+
+    assert link["href"] == "/proxy?url=https%3A%2F%2Fexample.com%2Fa"
+
+
+def test_many_noscript_refreshes_downgrade_in_linear_time():
+    import time
+
+    html = "<html><head>" + (
+        "<noscript><meta http-equiv=refresh content='0; url=/x'></noscript>" * 16000
+    ) + "</head><body></body></html>"
+
+    started = time.monotonic()
+    downgrade_html(_document(html, url="https://example.com/"))
+
+    assert time.monotonic() - started < 6.0
