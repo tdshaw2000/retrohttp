@@ -367,6 +367,29 @@ def _ensure_body(soup: BeautifulSoup):
     return soup.body
 
 
+# What a <head> may hold. Anything else there (typically the content of an
+# unwrapped <noscript>, which lxml leaves in <head>) belongs in <body>.
+_HEAD_CONTENT_TAGS = {"title", "meta", "base", "link", "style", "script", "isindex"}
+
+
+def _move_body_content_out_of_head(soup: BeautifulSoup) -> None:
+    if soup.head is None:
+        return
+    strays = []
+    for child in soup.head.contents:
+        if child.name is None:
+            if isinstance(child, PreformattedString) or not child.strip():
+                continue
+        elif child.name in _HEAD_CONTENT_TAGS:
+            continue
+        strays.append(child)
+    body = _ensure_body(soup) if strays else None
+    if body is None:
+        return
+    for index, child in enumerate(strays):
+        body.insert(index, child.extract())
+
+
 def _handle_meta_tags(soup: BeautifulSoup, base_url: str, warnings: list):
     """Keep only <meta http-equiv="refresh">, rewritten through the proxy.
 
@@ -377,8 +400,8 @@ def _handle_meta_tags(soup: BeautifulSoup, base_url: str, warnings: list):
     kept with its URL proxied, and a plain link to the same target is put
     at the top of <body> for clients that don't honor refresh (Mosaic).
 
-    Returns that link's paragraph (or None), so _drop_refresh_over_content
-    can tell it apart from the page's own content.
+    Returns that link's paragraph and its unproxied target (or Nones), so
+    _drop_refresh_over_content can tell it apart from the page's content.
     """
     refresh_links = []
     for tag in soup.find_all("meta"):
@@ -401,10 +424,13 @@ def _handle_meta_tags(soup: BeautifulSoup, base_url: str, warnings: list):
         delay = max(int(delay_match.group(1)), MIN_REFRESH_DELAY_SECONDS)
         rewritten = _proxy_rewrite(base_url, resolved, "/proxy")
         tag.attrs = {"http-equiv": "Refresh", "content": f"{delay}; URL={rewritten}"}
+        # RFC 1866 only allows META in HEAD.
+        if soup.head is not None and all(p is not soup.head for p in tag.parents):
+            soup.head.append(tag.extract())
 
     body = _ensure_body(soup) if refresh_links else None
     if body is None:
-        return None
+        return None, None
     notice = soup.new_tag("p")
     notice.append(NavigableString("This page redirects to "))
     link = soup.new_tag("a", href=refresh_links[0])
@@ -413,10 +439,12 @@ def _handle_meta_tags(soup: BeautifulSoup, base_url: str, warnings: list):
     notice.append(NavigableString("."))
     body.insert(0, notice)
     warnings.append("kept <meta> refresh with proxied URL and added a visible link to it")
-    return notice
+    return notice, refresh_links[0]
 
 
-def _drop_refresh_over_content(soup: BeautifulSoup, refresh_notice, warnings: list) -> None:
+def _drop_refresh_over_content(
+    soup: BeautifulSoup, refresh_notice, refresh_target, base_url: str, warnings: list
+) -> None:
     """Only auto-refresh a page that has nothing else to show.
 
     A server-rendered article with a <noscript> refresh to an "enable
@@ -429,6 +457,11 @@ def _drop_refresh_over_content(soup: BeautifulSoup, refresh_notice, warnings: li
     refreshes = soup.find_all("meta")
     for tag in refreshes:
         tag.decompose()
+    # A periodic self-reload (news front pages) isn't a redirect at all.
+    target = urlparse(refresh_target)
+    page = urlparse(base_url)
+    if (target.netloc, target.path) == (page.netloc, page.path):
+        refresh_notice.decompose()
     if refreshes:
         warnings.append("dropped <meta> refresh because the page has its own content")
 
@@ -759,20 +792,23 @@ def downgrade_html(
     soup = BeautifulSoup(html_text, "lxml")
 
     _strip_block_tags(soup, warnings, resolved_dialect.block_strip_tags)
+    _move_body_content_out_of_head(soup)
     _strip_stylesheet_links(soup, warnings)
     _filter_style_blocks(soup, warnings, resolved_dialect.allows_css)
     _strip_style_attributes(
         soup, warnings, resolved_dialect.allowed_tags, resolved_dialect.allows_css
     )
     _strip_javascript_hrefs(soup, warnings)
-    refresh_notice = _handle_meta_tags(soup, document.url, warnings)
+    refresh_notice, refresh_target = _handle_meta_tags(soup, document.url, warnings)
     _rewrite_asset_and_page_urls(soup, document.url, warnings, asset_refs)
     _flatten_nested_tables(soup, warnings)
     _unwrap_disallowed_tags(
         soup, warnings, resolved_dialect.allowed_tags, resolved_dialect.name
     )
     _transliterate_to_ascii(soup, warnings)
-    _drop_refresh_over_content(soup, refresh_notice, warnings)
+    _drop_refresh_over_content(
+        soup, refresh_notice, refresh_target, document.url, warnings
+    )
     _add_empty_page_notice(soup, warnings)
 
     html = str(soup)
