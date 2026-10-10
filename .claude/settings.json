@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__.*__update_pull_request|mcp__.*__create_pull_request|mcp__.*__merge_pull_request|mcp__.*__enable_pr_auto_merge|Bash|Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/review_gate.py\" gate"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "reviewer",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/review_gate.py\" record"
+          }
+        ]
+      }
+    ]
+  }
+}
