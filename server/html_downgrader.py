@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from urllib.parse import quote, urljoin, urlparse
 
 from bs4 import BeautifulSoup, NavigableString
+from bs4.element import PreformattedString
 
 from server.asset_converter import MAX_WIDTH
 from server.contracts import DowngradedDocument, FetchedDocument
@@ -444,9 +445,12 @@ def _has_visible_content(body, ignore=None) -> bool:
     """True if body shows anything, leaving out the `ignore` subtree."""
 
     def counts(node) -> bool:
-        return ignore is None or ignore not in node.parents
+        return all(parent is not ignore for parent in node.parents)
 
     for text in body.find_all(string=True):
+        # Comments, CDATA, doctypes etc. are never rendered.
+        if isinstance(text, PreformattedString):
+            continue
         if text.strip() and text.parent.name not in _NON_RENDERED_TEXT_PARENTS and counts(text):
             return True
     for tag in body.find_all(["img", "input", "select", "textarea"]):
