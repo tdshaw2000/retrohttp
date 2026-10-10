@@ -342,8 +342,13 @@ def _proxy_rewrite(base_url: str, target: str, route: str) -> str | None:
 MIN_REFRESH_DELAY_SECONDS = 3
 
 
-def _meta_refresh_target(content: str | None) -> str | None:
-    """The URL in a refresh `content` like `5; URL='/next'`, or None.
+_ASCII_DIGITS = frozenset("0123456789")
+# int() refuses very long digit strings; nobody needs a refresh this long.
+_MAX_DELAY_DIGITS = 6
+
+
+def _parse_meta_refresh(content: str | None) -> tuple[int, str] | None:
+    """(delay seconds, URL) from a refresh `content` like `5; URL='/next'`.
 
     Plain string splitting rather than a regex: a backtracking pattern
     over attacker-controlled whitespace can take seconds per page, and
@@ -355,13 +360,16 @@ def _meta_refresh_target(content: str | None) -> str | None:
     if separator < 0:
         return None
     delay, rest = content[:separator].strip(), content[separator + 1 :].strip()
-    if not delay or not delay[0].isdigit() or not all(c.isdigit() or c == "." for c in delay):
+    whole_seconds = delay.split(".", 1)[0]
+    if not whole_seconds or not set(delay) <= _ASCII_DIGITS | {"."}:
         return None
     if rest[:3].lower() == "url" and rest[3:].lstrip().startswith("="):
         rest = rest[3:].lstrip()[1:].strip()
     if len(rest) >= 2 and rest[0] == rest[-1] and rest[0] in "\"'":
         rest = rest[1:-1].strip()
-    return rest or None
+    if not rest:
+        return None
+    return int(whole_seconds[:_MAX_DELAY_DIGITS]), rest
 
 
 def _ensure_body(soup: BeautifulSoup):
@@ -413,8 +421,8 @@ def _handle_meta_tags(soup: BeautifulSoup, base_url: str, warnings: list):
     refresh_links = []
     for tag in soup.find_all("meta"):
         http_equiv = (tag.get("http-equiv") or "").strip().lower()
-        target = _meta_refresh_target(tag.get("content")) if http_equiv == "refresh" else None
-        resolved = _resolve_proxyable_target(base_url, target) if target else None
+        parsed = _parse_meta_refresh(tag.get("content")) if http_equiv == "refresh" else None
+        resolved = _resolve_proxyable_target(base_url, parsed[1]) if parsed else None
         if not resolved:
             tag.decompose()
             continue
@@ -427,8 +435,7 @@ def _handle_meta_tags(soup: BeautifulSoup, base_url: str, warnings: list):
         if (target_parts.netloc, target_parts.path) == (page_parts.netloc, page_parts.path):
             tag.decompose()
             continue
-        delay_match = re.match(r"\s*(\d{1,6})", tag["content"])  # int() rejects huge strings
-        delay = max(int(delay_match.group(1)), MIN_REFRESH_DELAY_SECONDS)
+        delay = max(parsed[0], MIN_REFRESH_DELAY_SECONDS)
         rewritten = _proxy_rewrite(base_url, resolved, "/proxy")
         tag.attrs = {"http-equiv": "Refresh", "content": f"{delay}; URL={rewritten}"}
         # RFC 1866 only allows META in HEAD.
