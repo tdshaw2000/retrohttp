@@ -19,4 +19,6 @@ jobs:
         with:
           python-version: "3.13"
       - run: pip install -e . pytest pyyaml
+      # So the JavaScript rendering tests run against a real engine.
+      - run: python -m playwright install --with-deps chromium
       - run: python -m pytest -q

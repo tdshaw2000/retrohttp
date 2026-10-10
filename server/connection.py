@@ -23,6 +23,7 @@ def handle_connection(
     docroot: Path | None,
     asset_cache: AssetCache | None = None,
     html_version: str = "html2",
+    js_renderer=None,
     timeout: float = DEFAULT_RECV_TIMEOUT_SECONDS,
 ) -> None:
     conn.settimeout(timeout)
@@ -58,7 +59,9 @@ def handle_connection(
 
         if request.target.startswith(PROXY_TARGET_SCHEMES):
             cache = asset_cache or AssetCache(Path(tempfile.mkdtemp(prefix="retrohttp-assets-")))
-            result = handle_proxy_request(request.target, cache, dialect=html_version)
+            result = handle_proxy_request(
+                request.target, cache, dialect=html_version, renderer=js_renderer
+            )
         elif docroot is None:
             result = NO_DOCROOT_RESULT
         else:

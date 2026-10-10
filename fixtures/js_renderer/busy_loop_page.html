@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Never finishes</title>
+<script>
+  // Loads normally, then locks up the page's only thread for good.
+  window.addEventListener("load", function () {
+    setTimeout(function () { while (true) {} }, 50);
+  });
+</script>
+</head>
+<body><div id="root"></div></body>
+</html>

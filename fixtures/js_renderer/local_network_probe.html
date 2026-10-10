@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Probe</title>
+<script>
+  // A hostile page trying to reach a service on the proxy's own network.
+  // __TARGET__ is replaced by the test with that service's address.
+  document.addEventListener("DOMContentLoaded", function () {
+    document.getElementById("root").innerHTML = "<p>Probe page " + navigator.userAgent + "</p>";
+    fetch("__TARGET__/admin/reboot", { method: "POST", mode: "no-cors", body: "confirm=1" }).catch(function () {});
+    fetch("__TARGET__/config").then(function (r) { return r.text(); }).then(function (t) {
+      document.getElementById("root").innerHTML += "<p>Leaked " + t + "</p>";
+    }).catch(function () {});
+    var img = new Image(); img.src = "__TARGET__/pixel.gif";
+    var ws = new WebSocket("__TARGET__/socket".replace("http", "ws"));
+    var worker = new Worker(URL.createObjectURL(new Blob(
+      ['fetch("__TARGET__/worker", { method: "POST", mode: "no-cors", body: "x" })'],
+      { type: "text/javascript" })));
+  });
+</script>
+</head>
+<body><div id="root"></div></body>
+</html>

@@ -195,11 +195,43 @@ in wide use well before HTML 3.2 formalized them in Jan 1997, so
 - Modern fetch path handles redirects, gzip/br decoding, and normal
   HTTPS certificate validation as any current client would.
 
+## JavaScript-only pages
+
+Some pages send an empty shell and build everything with JavaScript.
+When a proxied page (status 200) downgrades to nothing visible, the
+proxy loads it once in a headless browser engine (Chromium, via
+Playwright), takes the page as it looks after its scripts ran, and
+downgrades that instead. Normal pages never start the engine.
+
+- It is a snapshot: buttons, menus and forms that need JavaScript
+  still do nothing on the target client. `<script>` is stripped from
+  the rendered page like any other.
+- Setting: `--render-js` / `--no-render-js` on the server, default on.
+  The startup line says whether it is on and whether the engine is
+  installed.
+- The engine is optional. Without it (or if a render fails, times out,
+  or still has nothing visible) the page gets the usual empty-page
+  notice. One-time install: `python -m playwright install --with-deps
+  chromium` in the server's virtualenv.
+- Only http/https URLs are rendered, at most two at a time.
+- It runs a stranger's JavaScript on the proxy's machine, so each
+  render is its own process, killed with its browser after a hard
+  deadline; the browser's only way out is a small forward proxy
+  (`server/guard_proxy.py`) that refuses any host resolving to a
+  non-public address and connects to exactly the address it checked
+  (so DNS rebinding gets nowhere), streams with a per-render byte
+  budget, and is the route for redirects, workers and WebSockets too;
+  WebRTC, QUIC and service workers are switched off; and Chromium's
+  sandbox is used where the system supports it (the startup line says
+  when it can't). The engine sends
+  Chromium's User-Agent with the retrohttp token appended.
+
 ## Non-goals (v1)
 
 - No support for authentication-gated pages
 - No cookies/session state
-- No JavaScript execution or approximation of JS-dependent content
+- No JavaScript execution on the target clients, and no approximation
+  of JS-dependent content beyond the one fallback below
 - No attempt to preserve pixel-accurate modern layouts — "recognizable
   and readable" is the bar, not visual fidelity
 

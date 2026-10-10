@@ -1084,3 +1084,26 @@ def test_many_noscript_refreshes_downgrade_in_linear_time():
     downgrade_html(_document(html, url="https://example.com/"))
 
     assert time.monotonic() - started < 6.0
+
+
+def test_empty_page_is_reported_as_having_no_content():
+    html = '<html><body><div id="root"></div><script>render()</script></body></html>'
+
+    result = downgrade_html(_document(html))
+
+    assert result.has_content is False
+
+
+def test_page_with_text_is_reported_as_having_content():
+    result = downgrade_html(_document("<html><body><p>Hello</p></body></html>"))
+
+    assert result.has_content is True
+
+
+def test_empty_page_notice_does_not_say_the_proxy_never_runs_javascript():
+    html = '<html><body><div id="root"></div></body></html>'
+
+    result = downgrade_html(_document(html))
+    text = BeautifulSoup(result.html, "lxml").body.get_text()
+
+    assert "does not run" not in text

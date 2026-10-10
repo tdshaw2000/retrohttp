@@ -218,3 +218,32 @@ def test_proxy_mode_request_upstream_unreachable_returns_500(tmp_path):
     response = client.recv(65536)
 
     assert response.startswith(b"HTTP/1.0 500 Internal Server Error\r\n")
+
+
+def test_proxy_mode_request_passes_the_renderer_through(tmp_path):
+    routes = {
+        "/page": {
+            "status": 200,
+            "headers": {"Content-Type": "text/html; charset=utf-8"},
+            "body": b"<html><body><div id='root'></div></body></html>",
+        }
+    }
+
+    class Renderer:
+        def render(self, url):
+            from server.contracts import FetchedDocument
+
+            return FetchedDocument(url=url, html=b"<html><body><p>Rendered</p></body></html>")
+
+    with run_origin_server(routes) as base_url:
+        client, server = socket.socketpair()
+        client.sendall(f"GET {base_url}/page HTTP/1.0\r\n\r\n".encode("ascii"))
+        client.shutdown(socket.SHUT_WR)
+
+        handle_connection(
+            server, tmp_path, asset_cache=AssetCache(tmp_path), js_renderer=Renderer()
+        )
+
+        response = client.recv(65536)
+
+    assert b"<p>Rendered</p>" in response

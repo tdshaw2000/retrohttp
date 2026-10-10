@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Docs</title>
+<script>
+  // A typical single-page app shell: the server sends an empty mount
+  // point and the article only exists once this script has run.
+  document.addEventListener("DOMContentLoaded", function () {
+    var root = document.getElementById("root");
+    root.innerHTML =
+      "<h1>Getting started</h1>" +
+      "<p>Rendered by script: install the package, then run it.</p>" +
+      '<p><a href="/next">Next page</a></p>';
+  });
+</script>
+</head>
+<body>
+<div id="root"></div>
+</body>
+</html>

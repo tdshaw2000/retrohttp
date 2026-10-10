@@ -9,6 +9,9 @@ dependencies = [
     "beautifulsoup4",
     "lxml",
     "Pillow",
+    # Browser engine for JavaScript-only pages; its Chromium build is a
+    # separate one-time install (python -m playwright install chromium).
+    "playwright>=1.48",
 ]
 
 [dependency-groups]
