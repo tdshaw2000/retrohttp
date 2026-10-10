@@ -1019,3 +1019,28 @@ def test_tracking_pixels_are_dropped_and_not_fetched(size):
 
     assert "<img" not in result.html
     assert result.asset_refs == []
+
+
+def test_visible_link_matches_the_kept_author_refresh():
+    html = (
+        "<html><head><noscript><meta http-equiv=refresh content='0; url=/enable-js'>"
+        "</noscript><meta http-equiv=refresh content='5; url=https://example.com/new'>"
+        "</head><body><p>This page has moved.</p></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://example.com/old"))
+    soup = BeautifulSoup(result.html, "lxml")
+
+    proxied = "/proxy?url=https%3A%2F%2Fexample.com%2Fnew"
+    assert soup.find("meta")["content"] == f"5; URL={proxied}"
+    assert soup.body.find("a")["href"] == proxied
+
+
+@pytest.mark.parametrize("size", [("100%", "1"), ("1", "400")])
+def test_one_pixel_rule_and_spacer_images_are_kept(size):
+    width, height = size
+    html = f'<p>Text</p><img src="/rule.gif" width="{width}" height="{height}">'
+
+    result = downgrade_html(_document(html))
+
+    assert "<img" in result.html
