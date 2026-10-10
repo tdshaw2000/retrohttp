@@ -119,13 +119,13 @@ def test_keeps_meta_refresh_inside_noscript_with_proxied_url():
         "<body><div></div></body></html>"
     )
 
-    result = downgrade_html(_document(html, url="https://www.facebook.com/"))
+    result = downgrade_html(_document(html, url="https://www.facebook.com/home.php"))
     soup = BeautifulSoup(result.html, "lxml")
 
     proxied = "/proxy?url=https%3A%2F%2Fwww.facebook.com%2F%3F_fb_noscript%3D1"
     meta = soup.find("meta")
     assert meta["http-equiv"] == "Refresh"
-    assert meta["content"] == f"0; URL={proxied}"
+    assert meta["content"] == f"3; URL={proxied}"
     # Visible fallback for clients that ignore refresh (Mosaic).
     assert soup.body.find("a")["href"] == proxied
 
@@ -716,5 +716,69 @@ def test_facebook_style_js_shell_is_not_served_blank():
 
     for dialect in ("html2", "html3.2", "html4"):
         soup = BeautifulSoup(downgrade_html(document, dialect=dialect).html, "lxml")
-        assert soup.find("meta", attrs={"http-equiv": "Refresh"}) is not None
+        assert soup.body.find("a") is not None
         assert soup.body.get_text().strip()
+
+
+def test_hidden_inputs_do_not_count_as_visible_content():
+    html = (
+        "<body><div id=root></div><form method=post action=/x>"
+        '<input type="hidden" name="lsd" value="AVq"></form>'
+        "<script>x()</script></body>"
+    )
+
+    result = downgrade_html(_document(html))
+
+    assert "JavaScript" in BeautifulSoup(result.html, "lxml").body.get_text()
+
+
+def test_html4_frameset_page_gets_no_empty_page_notice():
+    html = '<html><frameset cols="50%,50%"><frame src="/a"><frame src="/b"></frameset></html>'
+
+    result = downgrade_html(_document(html), dialect="html4")
+
+    assert "<body" not in result.html
+    assert "JavaScript" not in result.html
+    assert not any("no visible content" in w for w in result.warnings)
+
+
+def test_meta_refresh_back_to_the_same_path_is_dropped_but_link_kept():
+    # The fetcher keeps no cookies, so a refresh to the same path can loop
+    # forever on a client that can't escape a 0-second refresh.
+    html = (
+        '<html><head><noscript><meta http-equiv="refresh" '
+        'content="0; URL=/?_fb_noscript=1" /></noscript></head>'
+        "<body></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://www.facebook.com/"))
+    soup = BeautifulSoup(result.html, "lxml")
+
+    assert soup.find("meta") is None
+    assert soup.body.find("a")["href"] == (
+        "/proxy?url=https%3A%2F%2Fwww.facebook.com%2F%3F_fb_noscript%3D1"
+    )
+
+
+def test_meta_refresh_delay_is_raised_to_a_small_minimum():
+    html = (
+        '<html><head><meta http-equiv="refresh" content="0; URL=/next"></head>'
+        "<body><p>x</p></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://example.com/a"))
+    meta = BeautifulSoup(result.html, "lxml").find("meta")
+
+    assert meta["content"].startswith("3; ")
+
+
+@pytest.mark.parametrize("content", ["garbage", "0", "0; "])
+def test_meta_refresh_without_a_real_url_is_dropped(content):
+    html = (
+        f'<html><head><meta http-equiv="refresh" content="{content}"></head>'
+        "<body><p>x</p></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://example.com/a"))
+
+    assert "<meta" not in result.html
