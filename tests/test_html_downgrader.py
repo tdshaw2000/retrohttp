@@ -929,3 +929,12 @@ def test_refresh_url_may_contain_an_apostrophe():
     meta = BeautifulSoup(result.html, "lxml").find("meta")
 
     assert meta["content"] == "3; URL=/proxy?url=https%3A%2F%2Fexample.com%2Fa%27b"
+
+
+@pytest.mark.parametrize("content", ["\u00b2; URL=/next", "\u0661; URL=/next"])
+def test_non_ascii_digit_delay_does_not_crash(content):
+    html = f'<html><head><meta http-equiv="refresh" content="{content}"></head><body></body></html>'
+
+    result = downgrade_html(_document(html, url="https://example.com/a"))
+
+    assert "<meta" not in result.html
