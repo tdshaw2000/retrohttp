@@ -402,9 +402,12 @@ def _ensure_head(soup: BeautifulSoup):
 def _move_body_content_out_of_head(soup: BeautifulSoup) -> None:
     if soup.head is None:
         return
-    # Unwrap first, so head-only tags inside (style, meta) stay in <head>.
-    for noscript in soup.head.find_all("noscript"):
-        noscript.unwrap()
+    # Head-only tags inside a head <noscript> (style, meta) stay in <head>;
+    # the rest of the noscript moves to <body> below. Appending pulls each
+    # tag out of its small noscript, never out of the (possibly huge) head.
+    for noscript in soup.head.find_all("noscript", recursive=False):
+        for child in [c for c in noscript.contents if c.name in _HEAD_CONTENT_TAGS]:
+            soup.head.append(child)
     strays = []
     for child in soup.head.contents:
         if child.name is None:
@@ -421,7 +424,7 @@ def _move_body_content_out_of_head(soup: BeautifulSoup) -> None:
 
 
 def _handle_meta_tags(
-    soup: BeautifulSoup, base_url: str, noscript_metas: list, warnings: list
+    soup: BeautifulSoup, base_url: str, noscript_meta_ids: set, warnings: list
 ):
     """Keep only <meta http-equiv="refresh">, rewritten through the proxy.
 
@@ -435,9 +438,15 @@ def _handle_meta_tags(
     Returns that link's paragraph, its unproxied target (or Nones), and the
     kept refreshes that came from <noscript>, for _drop_refresh_over_content.
     """
-    refresh_links = []
+    # Each in page order. The visible link must point where a kept refresh
+    # goes: an author refresh (always kept), else a <noscript> one (which
+    # _drop_refresh_over_content may still drop over content), else a
+    # same-page target whose meta was dropped (Facebook's fallback).
+    author_targets, noscript_targets, same_page_targets = [], [], []
     noscript_refreshes = []
     has_frameset = soup.find("frameset") is not None
+    page_parts = urlparse(base_url)
+    head = None
     for tag in soup.find_all("meta"):
         http_equiv = (tag.get("http-equiv") or "").strip().lower()
         parsed = _parse_meta_refresh(tag.get("content")) if http_equiv == "refresh" else None
@@ -445,36 +454,36 @@ def _handle_meta_tags(
         if not resolved:
             tag.decompose()
             continue
-        from_noscript = any(tag is meta for meta in noscript_metas)
+        from_noscript = id(tag) in noscript_meta_ids
         # A frameset is content, so a no-JS fallback refresh must not
         # navigate away from it (the frames are the page).
         if from_noscript and has_frameset:
             tag.decompose()
             continue
-        # Left unproxied: _rewrite_asset_and_page_urls proxies <a href>.
-        # Author refreshes go first: a <noscript> one may be dropped later
-        # (_drop_refresh_over_content), and the link must match what stays.
-        if from_noscript:
-            refresh_links.append(resolved)
-        else:
-            refresh_links.insert(0, resolved)
         # The fetcher keeps no cookies, so a refresh back to the same
         # path (Facebook's /?_fb_noscript=1 from /) can serve the same
         # shell again and loop forever; keep only the visible link then.
-        target_parts, page_parts = urlparse(resolved), urlparse(base_url)
+        target_parts = urlparse(resolved)
         if (target_parts.netloc, target_parts.path) == (page_parts.netloc, page_parts.path):
+            same_page_targets.append(resolved)
             tag.decompose()
             continue
         delay = max(parsed[0], MIN_REFRESH_DELAY_SECONDS)
         rewritten = _proxy_rewrite(base_url, resolved, "/proxy")
         tag.attrs = {"http-equiv": "Refresh", "content": f"{delay}; URL={rewritten}"}
         if from_noscript:
+            noscript_targets.append(resolved)
             noscript_refreshes.append(tag)
+        else:
+            author_targets.append(resolved)
         # RFC 1866 only allows META in HEAD.
-        head = _ensure_head(soup)
-        if all(p is not head for p in tag.parents):
-            head.append(tag.extract())
+        if head is None:
+            head = _ensure_head(soup)
+        if tag.parent is not head:
+            head.append(tag)
 
+    # Left unproxied: _rewrite_asset_and_page_urls proxies <a href>.
+    refresh_links = author_targets + noscript_targets + same_page_targets
     body = _ensure_body(soup) if refresh_links else None
     if body is None:
         return None, None, []
@@ -862,7 +871,9 @@ def downgrade_html(
 
     _strip_block_tags(soup, warnings, resolved_dialect.block_strip_tags)
     # Recorded before head <noscript> is unwrapped below.
-    noscript_metas = [meta for meta in soup.find_all("meta") if meta.find_parent("noscript")]
+    noscript_meta_ids = {
+        id(meta) for meta in soup.find_all("meta") if meta.find_parent("noscript")
+    }
     _move_body_content_out_of_head(soup)
     _strip_stylesheet_links(soup, warnings)
     _filter_style_blocks(soup, warnings, resolved_dialect.allows_css)
@@ -871,7 +882,7 @@ def downgrade_html(
     )
     _strip_javascript_hrefs(soup, warnings)
     refresh_notice, refresh_target, noscript_refreshes = _handle_meta_tags(
-        soup, document.url, noscript_metas, warnings
+        soup, document.url, noscript_meta_ids, warnings
     )
     _drop_tracking_pixels(soup, warnings)
     _rewrite_asset_and_page_urls(soup, document.url, warnings, asset_refs)
