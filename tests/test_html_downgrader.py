@@ -938,3 +938,149 @@ def test_non_ascii_digit_delay_does_not_crash(content):
     result = downgrade_html(_document(html, url="https://example.com/a"))
 
     assert "<meta" not in result.html
+
+
+def test_author_refresh_over_content_keeps_auto_refresh():
+    html = (
+        '<html><head><meta http-equiv="refresh" content="5; url=https://example.com/new">'
+        "</head><body><p>This page has moved.</p></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://example.com/old"))
+    meta = BeautifulSoup(result.html, "lxml").find("meta")
+
+    assert meta["content"] == "5; URL=/proxy?url=https%3A%2F%2Fexample.com%2Fnew"
+
+
+def test_html4_frameset_drops_noscript_refresh():
+    html = (
+        '<html><head><noscript><meta http-equiv="refresh" content="0; url=/x">'
+        '</noscript></head><frameset><frame src="/f"></frameset></html>'
+    )
+
+    result = downgrade_html(_document(html, url="https://example.com/"), dialect="html4")
+
+    assert "<meta" not in result.html
+
+
+def test_refresh_delay_with_leading_zeros_keeps_its_value():
+    html = (
+        '<html><head><meta http-equiv="refresh" content="0000000060; url=/next">'
+        "</head><body></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://example.com/a"))
+
+    assert BeautifulSoup(result.html, "lxml").find("meta")["content"].startswith("60; ")
+
+
+def test_style_inside_head_noscript_stays_in_head_for_html4():
+    html = (
+        "<html><head><noscript><style>.a{color:red}</style><p>No JS</p></noscript>"
+        "</head><body></body></html>"
+    )
+
+    result = downgrade_html(_document(html), dialect="html4")
+    soup = BeautifulSoup(result.html, "lxml")
+
+    assert soup.head.find("style") is not None
+    assert soup.body.find("style") is None
+    assert "No JS" in soup.body.get_text()
+
+
+def test_refresh_meta_goes_in_a_created_head_when_page_has_none():
+    html = "<div></div><noscript><meta http-equiv=refresh content='0;url=http://other.example/x'></noscript>"
+
+    result = downgrade_html(_document(html, url="https://example.com/"))
+    soup = BeautifulSoup(result.html, "lxml")
+
+    assert soup.body.find("meta") is None
+    assert soup.head is not None and soup.head.find("meta") is not None
+
+
+def test_empty_page_notice_does_not_only_blame_javascript():
+    html = "<html><body><p>你好</p></body></html>"
+
+    result = downgrade_html(_document(html))
+    text = BeautifulSoup(result.html, "lxml").body.get_text()
+
+    assert "frames" in text and "characters" in text
+
+
+@pytest.mark.parametrize("size", [("1", "1"), ("0", "0"), ("1px", "1px")])
+def test_tracking_pixels_are_dropped_and_not_fetched(size):
+    width, height = size
+    html = (
+        f'<p>Text</p><noscript><img src="https://www.facebook.com/tr?id=1" '
+        f'width="{width}" height="{height}"></noscript>'
+    )
+
+    result = downgrade_html(_document(html))
+
+    assert "<img" not in result.html
+    assert result.asset_refs == []
+
+
+def test_visible_link_matches_the_kept_author_refresh():
+    html = (
+        "<html><head><noscript><meta http-equiv=refresh content='0; url=/enable-js'>"
+        "</noscript><meta http-equiv=refresh content='5; url=https://example.com/new'>"
+        "</head><body><p>This page has moved.</p></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://example.com/old"))
+    soup = BeautifulSoup(result.html, "lxml")
+
+    proxied = "/proxy?url=https%3A%2F%2Fexample.com%2Fnew"
+    assert soup.find("meta")["content"] == f"5; URL={proxied}"
+    assert soup.body.find("a")["href"] == proxied
+
+
+@pytest.mark.parametrize("size", [("100%", "1"), ("1", "400")])
+def test_one_pixel_rule_and_spacer_images_are_kept(size):
+    width, height = size
+    html = f'<p>Text</p><img src="/rule.gif" width="{width}" height="{height}">'
+
+    result = downgrade_html(_document(html))
+
+    assert "<img" in result.html
+
+
+def test_link_follows_kept_noscript_refresh_when_author_one_reloads_same_page():
+    html = (
+        "<html><head><meta http-equiv=refresh content='300; url=/old'>"
+        "<noscript><meta http-equiv=refresh content='0; url=/enable-js'></noscript>"
+        "</head><body></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://example.com/old"))
+    soup = BeautifulSoup(result.html, "lxml")
+
+    proxied = "/proxy?url=https%3A%2F%2Fexample.com%2Fenable-js"
+    assert soup.find("meta")["content"] == f"3; URL={proxied}"
+    assert soup.body.find("a")["href"] == proxied
+
+
+def test_link_follows_the_first_author_refresh_in_page_order():
+    html = (
+        "<html><head><meta http-equiv=refresh content='5; url=/a'>"
+        "<meta http-equiv=refresh content='5; url=/b'></head><body></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://example.com/x"))
+    link = BeautifulSoup(result.html, "lxml").body.find("a")
+
+    assert link["href"] == "/proxy?url=https%3A%2F%2Fexample.com%2Fa"
+
+
+def test_many_noscript_refreshes_downgrade_in_linear_time():
+    import time
+
+    html = "<html><head>" + (
+        "<noscript><meta http-equiv=refresh content='0; url=/x'></noscript>" * 16000
+    ) + "</head><body></body></html>"
+
+    started = time.monotonic()
+    downgrade_html(_document(html, url="https://example.com/"))
+
+    assert time.monotonic() - started < 6.0

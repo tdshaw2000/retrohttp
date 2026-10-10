@@ -369,7 +369,10 @@ def _parse_meta_refresh(content: str | None) -> tuple[int, str] | None:
         rest = rest[1:-1].strip()
     if not rest:
         return None
-    return int(whole_seconds[:_MAX_DELAY_DIGITS]), rest
+    whole_seconds = whole_seconds.lstrip("0") or "0"
+    if len(whole_seconds) > _MAX_DELAY_DIGITS:
+        return int("9" * _MAX_DELAY_DIGITS), rest
+    return int(whole_seconds), rest
 
 
 def _ensure_body(soup: BeautifulSoup):
@@ -387,9 +390,24 @@ def _ensure_body(soup: BeautifulSoup):
 _HEAD_CONTENT_TAGS = {"title", "meta", "base", "link", "style", "script", "isindex"}
 
 
+def _ensure_head(soup: BeautifulSoup):
+    """The document's <head>, created before <body> if missing."""
+    if soup.head is None:
+        head = soup.new_tag("head")
+        root = soup.html or soup
+        root.insert(0, head)
+    return soup.head
+
+
 def _move_body_content_out_of_head(soup: BeautifulSoup) -> None:
     if soup.head is None:
         return
+    # Head-only tags inside a head <noscript> (style, meta) stay in <head>;
+    # the rest of the noscript moves to <body> below. Appending pulls each
+    # tag out of its small noscript, never out of the (possibly huge) head.
+    for noscript in soup.head.find_all("noscript", recursive=False):
+        for child in [c for c in noscript.contents if c.name in _HEAD_CONTENT_TAGS]:
+            soup.head.append(child)
     strays = []
     for child in soup.head.contents:
         if child.name is None:
@@ -405,7 +423,9 @@ def _move_body_content_out_of_head(soup: BeautifulSoup) -> None:
         body.insert(index, child.extract())
 
 
-def _handle_meta_tags(soup: BeautifulSoup, base_url: str, warnings: list):
+def _handle_meta_tags(
+    soup: BeautifulSoup, base_url: str, noscript_meta_ids: set, warnings: list
+):
     """Keep only <meta http-equiv="refresh">, rewritten through the proxy.
 
     Everything else (<meta charset>, viewport, og:*, ...) is dropped -
@@ -415,10 +435,18 @@ def _handle_meta_tags(soup: BeautifulSoup, base_url: str, warnings: list):
     kept with its URL proxied, and a plain link to the same target is put
     at the top of <body> for clients that don't honor refresh (Mosaic).
 
-    Returns that link's paragraph and its unproxied target (or Nones), so
-    _drop_refresh_over_content can tell it apart from the page's content.
+    Returns that link's paragraph, its unproxied target (or Nones), and the
+    kept refreshes that came from <noscript>, for _drop_refresh_over_content.
     """
-    refresh_links = []
+    # Each in page order. The visible link must point where a kept refresh
+    # goes: an author refresh (always kept), else a <noscript> one (which
+    # _drop_refresh_over_content may still drop over content), else a
+    # same-page target whose meta was dropped (Facebook's fallback).
+    author_targets, noscript_targets, same_page_targets = [], [], []
+    noscript_refreshes = []
+    has_frameset = soup.find("frameset") is not None
+    page_parts = urlparse(base_url)
+    head = None
     for tag in soup.find_all("meta"):
         http_equiv = (tag.get("http-equiv") or "").strip().lower()
         parsed = _parse_meta_refresh(tag.get("content")) if http_equiv == "refresh" else None
@@ -426,25 +454,39 @@ def _handle_meta_tags(soup: BeautifulSoup, base_url: str, warnings: list):
         if not resolved:
             tag.decompose()
             continue
-        # Left unproxied: _rewrite_asset_and_page_urls proxies <a href>.
-        refresh_links.append(resolved)
+        from_noscript = id(tag) in noscript_meta_ids
+        # A frameset is content, so a no-JS fallback refresh must not
+        # navigate away from it (the frames are the page).
+        if from_noscript and has_frameset:
+            tag.decompose()
+            continue
         # The fetcher keeps no cookies, so a refresh back to the same
         # path (Facebook's /?_fb_noscript=1 from /) can serve the same
         # shell again and loop forever; keep only the visible link then.
-        target_parts, page_parts = urlparse(resolved), urlparse(base_url)
+        target_parts = urlparse(resolved)
         if (target_parts.netloc, target_parts.path) == (page_parts.netloc, page_parts.path):
+            same_page_targets.append(resolved)
             tag.decompose()
             continue
         delay = max(parsed[0], MIN_REFRESH_DELAY_SECONDS)
         rewritten = _proxy_rewrite(base_url, resolved, "/proxy")
         tag.attrs = {"http-equiv": "Refresh", "content": f"{delay}; URL={rewritten}"}
+        if from_noscript:
+            noscript_targets.append(resolved)
+            noscript_refreshes.append(tag)
+        else:
+            author_targets.append(resolved)
         # RFC 1866 only allows META in HEAD.
-        if soup.head is not None and all(p is not soup.head for p in tag.parents):
-            soup.head.append(tag.extract())
+        if head is None:
+            head = _ensure_head(soup)
+        if tag.parent is not head:
+            head.append(tag)
 
+    # Left unproxied: _rewrite_asset_and_page_urls proxies <a href>.
+    refresh_links = author_targets + noscript_targets + same_page_targets
     body = _ensure_body(soup) if refresh_links else None
     if body is None:
-        return None, None
+        return None, None, []
     notice = soup.new_tag("p")
     notice.append(NavigableString("This page redirects to "))
     link = soup.new_tag("a", href=refresh_links[0])
@@ -453,22 +495,28 @@ def _handle_meta_tags(soup: BeautifulSoup, base_url: str, warnings: list):
     notice.append(NavigableString("."))
     body.insert(0, notice)
     warnings.append("kept <meta> refresh with proxied URL and added a visible link to it")
-    return notice, refresh_links[0]
+    return notice, refresh_links[0], noscript_refreshes
 
 
 def _drop_refresh_over_content(
-    soup: BeautifulSoup, refresh_notice, refresh_target, base_url: str, warnings: list
+    soup: BeautifulSoup,
+    refresh_notice,
+    refresh_target,
+    noscript_refreshes: list,
+    base_url: str,
+    warnings: list,
 ) -> None:
-    """Only auto-refresh a page that has nothing else to show.
+    """Only follow a <noscript> refresh on a page with nothing else to show.
 
     A server-rendered article with a <noscript> refresh to an "enable
-    JavaScript" page should stay readable; the visible link is enough.
+    JavaScript" page should stay readable; the visible link is enough. A
+    refresh the author wrote directly ("this page has moved") is kept.
     """
     if refresh_notice is None:
         return
     if not _has_visible_content(soup.body, ignore=refresh_notice):
         return
-    refreshes = soup.find_all("meta")
+    refreshes = noscript_refreshes
     for tag in refreshes:
         tag.decompose()
     # A periodic self-reload (news front pages) isn't a redirect at all.
@@ -477,11 +525,29 @@ def _drop_refresh_over_content(
     if (target.netloc, target.path) == (page.netloc, page.path):
         refresh_notice.decompose()
     if refreshes:
-        warnings.append("dropped <meta> refresh because the page has its own content")
+        warnings.append("dropped <noscript> <meta> refresh because the page has its own content")
 
 
 # Images this small are tracking/beacon pixels, not visible content.
 _INVISIBLE_IMAGE_SIZES = {"0", "1"}
+
+
+def _is_tracking_pixel(tag) -> bool:
+    def size(attr):
+        value = (tag.get(attr) or "").strip().lower()
+        return value[:-2].strip() if value.endswith("px") else value
+
+    # Both dimensions: a 1px-tall rule or 1px-wide spacer is layout, not a beacon.
+    return size("width") in _INVISIBLE_IMAGE_SIZES and size("height") in _INVISIBLE_IMAGE_SIZES
+
+
+def _drop_tracking_pixels(soup: BeautifulSoup, warnings: list) -> None:
+    """Drop 0/1-pixel images, so the proxy never fetches the beacon."""
+    pixels = [tag for tag in soup.find_all("img") if _is_tracking_pixel(tag)]
+    for tag in pixels:
+        tag.decompose()
+    if pixels:
+        warnings.append(f"dropped {len(pixels)} tracking pixel image(s)")
 
 
 # Text inside these is never shown on the page.
@@ -505,18 +571,16 @@ def _has_visible_content(body, ignore=None) -> bool:
             continue
         if tag.name == "input" and (tag.get("type") or "").lower() == "hidden":
             continue
-        if tag.name == "img" and (
-            tag.get("width") in _INVISIBLE_IMAGE_SIZES
-            or tag.get("height") in _INVISIBLE_IMAGE_SIZES
-        ):
+        if tag.name == "img" and _is_tracking_pixel(tag):
             continue
         return True
     return False
 
 
 EMPTY_PAGE_NOTICE = (
-    "This page has no content this browser can display. The site most "
-    "likely builds its pages with JavaScript, which the proxy does not run."
+    "This page has no content this browser can display. It may be built "
+    "with JavaScript (which the proxy does not run), use frames, or be "
+    "written in characters this browser cannot show."
 )
 
 
@@ -806,6 +870,10 @@ def downgrade_html(
     soup = BeautifulSoup(html_text, "lxml")
 
     _strip_block_tags(soup, warnings, resolved_dialect.block_strip_tags)
+    # Recorded before head <noscript> is unwrapped below.
+    noscript_meta_ids = {
+        id(meta) for meta in soup.find_all("meta") if meta.find_parent("noscript")
+    }
     _move_body_content_out_of_head(soup)
     _strip_stylesheet_links(soup, warnings)
     _filter_style_blocks(soup, warnings, resolved_dialect.allows_css)
@@ -813,7 +881,10 @@ def downgrade_html(
         soup, warnings, resolved_dialect.allowed_tags, resolved_dialect.allows_css
     )
     _strip_javascript_hrefs(soup, warnings)
-    refresh_notice, refresh_target = _handle_meta_tags(soup, document.url, warnings)
+    refresh_notice, refresh_target, noscript_refreshes = _handle_meta_tags(
+        soup, document.url, noscript_meta_ids, warnings
+    )
+    _drop_tracking_pixels(soup, warnings)
     _rewrite_asset_and_page_urls(soup, document.url, warnings, asset_refs)
     _flatten_nested_tables(soup, warnings)
     _unwrap_disallowed_tags(
@@ -821,7 +892,7 @@ def downgrade_html(
     )
     _transliterate_to_ascii(soup, warnings)
     _drop_refresh_over_content(
-        soup, refresh_notice, refresh_target, document.url, warnings
+        soup, refresh_notice, refresh_target, noscript_refreshes, document.url, warnings
     )
     _add_empty_page_notice(soup, warnings)
 
