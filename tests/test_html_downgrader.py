@@ -905,3 +905,27 @@ def test_huge_refresh_delay_does_not_crash():
     result = downgrade_html(_document(html, url="https://example.com/a"))
 
     assert BeautifulSoup(result.html, "lxml").find("meta") is not None
+
+
+def test_refresh_content_parsing_is_fast_on_hostile_whitespace():
+    import time
+
+    content = "0;" + " " * 5000 + "x&#39;y"
+    html = f'<html><head><meta http-equiv="refresh" content="{content}"></head><body></body></html>'
+
+    started = time.monotonic()
+    downgrade_html(_document(html, url="https://example.com/a"))
+
+    assert time.monotonic() - started < 1.0
+
+
+def test_refresh_url_may_contain_an_apostrophe():
+    html = (
+        "<html><head><meta http-equiv=\"refresh\" content=\"0; url=/a'b\"></head>"
+        "<body></body></html>"
+    )
+
+    result = downgrade_html(_document(html, url="https://example.com/x"))
+    meta = BeautifulSoup(result.html, "lxml").find("meta")
+
+    assert meta["content"] == "3; URL=/proxy?url=https%3A%2F%2Fexample.com%2Fa%27b"
